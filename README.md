@@ -101,4 +101,4 @@ Basé sur RAUS — Réseau Actif d'Utilité Sociale — https://www.lechasseur.a
 ## Licence
 
 MIT — voir [`LICENSE`](./LICENSE). La condition d'attribution est décrite dans
-[`NOTICE`](./NOTICE) et fait partie des conditions de réutilisation.
+[`ATTRIBUTION.md`](./ATTRIBUTION.md) et fait partie des conditions de réutilisation.
