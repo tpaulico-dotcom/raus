@@ -9,6 +9,16 @@ Moteur 3D temps réel du monde entier en **Three.js + FastAPI**, ultra-léger, *
 > et toute mise en ligne doivent **citer le nom « RAUS »** et le site **www.lechasseur.art**
 > (avec un lien cliquable vers <https://www.lechasseur.art>).
 
+## Captures d'écran
+
+**Écran d'accueil — LIVE MODEL : globe ASCII, logo RAUS et recherche mondiale**
+
+![Écran d'accueil RAUS](docs/screenshots/01-accueil.webp)
+
+| Survol — La Paz, Bolivie | Survol — Nantes et la Loire |
+| :---: | :---: |
+| ![Survol de La Paz](docs/screenshots/02-la-paz.webp) | ![Survol de Nantes](docs/screenshots/03-nantes.webp) |
+
 ## Sources de données (100 % gratuites & monde entier)
 
 | Couche | Source | Clé API |
