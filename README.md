@@ -100,5 +100,5 @@ Basé sur RAUS — Réseau Actif d'Utilité Sociale — https://www.lechasseur.a
 
 ## Licence
 
-MIT — voir [`LICENSE`](./LICENSE). La clause d'attribution ci-dessus fait partie des conditions
-de réutilisation.
+MIT — voir [`LICENSE`](./LICENSE). La condition d'attribution est décrite dans
+[`NOTICE`](./NOTICE) et fait partie des conditions de réutilisation.
