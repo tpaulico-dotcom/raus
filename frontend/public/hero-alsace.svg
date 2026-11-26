@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Maison alsacienne">
+  <defs>
+    <linearGradient id="ciel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ab6d8"/><stop offset="1" stop-color="#cfe0f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" fill="url(#ciel)"/>
+  <polygon points="4,52 64,18 124,52" fill="#a2462a"/>
+  <polygon points="4,52 64,18 124,52" fill="none" stroke="#7e3520" stroke-width="2"/>
+  <rect x="18" y="52" width="92" height="60" fill="#e9ddc5"/>
+  <g stroke="#5c3c2d" stroke-width="5" fill="none" stroke-linecap="square">
+    <path d="M18 52v60M110 52v60M18 82h92"/>
+    <path d="M40 52v30M64 52v30M88 52v30M40 82v30M64 82v30M88 82v30"/>
+  </g>
+  <g fill="#3d7048">
+    <rect x="24" y="86" width="12" height="20"/><rect x="92" y="86" width="12" height="20"/>
+  </g>
+  <rect x="0" y="112" width="128" height="16" fill="#5a5d62"/>
+</svg>
