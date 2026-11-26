@@ -302,6 +302,17 @@ export default function Explorer() {
                 <p className="mt-4 font-mono text-[11px] text-slate-500">
                   Saisissez une adresse, une ville ou un lieu partout dans le monde pour démarrer.
                 </p>
+                <p className="mt-6 font-mono text-[11px] tracking-[0.12em] text-emerald-200/50">
+                  RAUS ·{" "}
+                  <a
+                    href="https://www.lechasseur.art"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-emerald-400/30 underline-offset-2 transition-colors hover:text-emerald-300"
+                  >
+                    www.lechasseur.art
+                  </a>
+                </p>
               </motion.div>
             </div>
           </motion.div>

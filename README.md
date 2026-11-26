@@ -1,6 +1,13 @@
 # RAUS — Réseau Actif d'Utilité Sociale
 
+**RAUS** · **[www.lechasseur.art](https://www.lechasseur.art)**
+
 Moteur 3D temps réel du monde entier en **Three.js + FastAPI**, ultra-léger, **100 % gratuit** et sans aucune clé API payante. Conçu comme socle réutilisable pour GPS 3D, jeux, géocaching, pèlerinages et trails.
+
+> ### Condition d'utilisation
+> Ce moteur est libre (MIT) **à une condition d'attribution** : toute réutilisation, tout dérivé
+> et toute mise en ligne doivent **citer le nom « RAUS »** et le site **www.lechasseur.art**
+> (avec un lien cliquable vers <https://www.lechasseur.art>).
 
 ## Sources de données (100 % gratuites & monde entier)
 
@@ -80,6 +87,18 @@ const unsubscribe = engine.onMove((pos) => {
 });
 ```
 
+## Attribution
+
+Ce projet est **RAUS — Réseau Actif d'Utilité Sociale**, publié par **www.lechasseur.art**.
+
+Toute réutilisation du code, totale ou partielle, tout dérivé et toute mise en ligne doivent
+conserver une mention visible :
+
+```
+Basé sur RAUS — Réseau Actif d'Utilité Sociale — https://www.lechasseur.art
+```
+
 ## Licence
 
-MIT — voir [`LICENSE`](./LICENSE).
+MIT — voir [`LICENSE`](./LICENSE). La clause d'attribution ci-dessus fait partie des conditions
+de réutilisation.
