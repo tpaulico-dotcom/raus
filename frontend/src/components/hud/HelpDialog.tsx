@@ -61,9 +61,13 @@ export default function HelpDialog({ open, onOpenChange, panneaux, onToggle, pla
           ))}
         </div>
         <KeyRows />
-        <p className="text-xs text-slate-500">
-          Données 100 % gratuites : © contributeurs OpenStreetMap (OpenFreeMap), relief AWS Terrarium,
-          météo Open-Meteo, empreintes Microsoft Building Footprints (ODbL).
+        <p className="text-xs leading-relaxed text-slate-500">
+          Données : <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-slate-300">OpenFreeMap</a>
+          {" · "}<a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-slate-300">© OpenMapTiles</a>
+          {" · "}<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-slate-300">© contributeurs OpenStreetMap</a>
+          {" · relief "}<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-slate-300">Mapzen / AWS Terrain Tiles</a>
+          {" · météo "}<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-slate-300">Open-Meteo.com</a>
+          {" · empreintes Microsoft Building Footprints (ODbL)."}
         </p>
       </DialogContent>
     </Dialog>

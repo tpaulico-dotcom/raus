@@ -276,7 +276,7 @@ export class TileManager {
     const queue = [...this.tiles.values()]
       .filter((e) => e.status === "queued" || e.status === "anticipated")
       .sort((a, b) => a.priority - b.priority);
-    while (this.inflight < 6 && queue.length) {
+    while (this.inflight < 4 && queue.length) {
       const e = queue.shift()!;
       e.status = "loading";
       this.inflight++;

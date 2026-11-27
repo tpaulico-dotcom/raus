@@ -174,7 +174,21 @@ export default function Explorer() {
             </div>
             <SearchBar onGo={onSearch} />
           </div>
+          <div className="flex flex-col items-end gap-2">
           <ControlsBar mode={mode} onMode={onMode} time={time} onTime={onTime} weatherLabel={hud?.weatherLabel} onHelp={() => setHelp(true)} />
+          <p
+            className="pointer-events-auto max-w-[440px] text-right font-mono text-[9px] leading-tight text-slate-400/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]"
+            data-testid="hud-attribution"
+          >
+            <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">OpenFreeMap</a>
+            {" · "}
+            <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">© OpenMapTiles</a>
+            {" · données "}
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">© OpenStreetMap</a>
+            {" · relief Mapzen/AWS · météo "}
+            <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">Open-Meteo.com</a>
+          </p>
+        </div>
         </header>
 
         <div className="absolute bottom-4 left-4 flex flex-col gap-3">

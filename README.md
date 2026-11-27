@@ -97,6 +97,25 @@ const unsubscribe = engine.onMove((pos) => {
 });
 ```
 
+## Attribution des données
+
+Ce moteur affiche des données sous licence ; les mentions suivantes sont **obligatoires** et sont
+affichées en permanence dans l'interface (coin supérieur droit) ainsi que dans le menu *Commandes* :
+
+```
+OpenFreeMap · © OpenMapTiles · données © OpenStreetMap · relief Mapzen/AWS · météo Open-Meteo.com
+```
+
+- [OpenFreeMap](https://openfreemap.org/) — hébergement des tuiles vectorielles, licence MIT, instance publique gratuite sans limite de requêtes.
+- [© OpenMapTiles](https://www.openmaptiles.org/) — schéma des tuiles.
+- [© contributeurs OpenStreetMap](https://www.openstreetmap.org/copyright) — données cartographiques (ODbL).
+- [Mapzen / AWS Terrain Tiles](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) — relief mondial (Terrarium).
+- [Open-Meteo.com](https://open-meteo.com/) — météo et soleil en direct (CC BY 4.0).
+- Microsoft Building Footprints (ODbL) — empreintes de secours là où OpenStreetMap est muet.
+
+Les requêtes sortantes sont plafonnées à **4 simultanées** vers OpenFreeMap, conformément à ses
+conditions d'utilisation.
+
 ## Attribution
 
 Ce projet est **RAUS — Réseau Actif d'Utilité Sociale**, publié par **www.lechasseur.art**.

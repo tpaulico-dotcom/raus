@@ -1,6 +1,7 @@
 """Fetch real OpenStreetMap vector tiles (OpenFreeMap, OpenMapTiles schema) and reduce them
 to a compact, 3D-ready payload: buildings with heights, roads, water, land cover, names, POIs."""
 
+import asyncio
 import gzip
 import logging
 import time
@@ -19,6 +20,9 @@ EXTENT = 4096
 
 _template: dict[str, Any] = {"url": None, "at": 0.0}
 
+# CGU OpenFreeMap : au maximum 4 requêtes simultanées vers le service public.
+_UPSTREAM = asyncio.Semaphore(4)
+
 
 async def _tile_template(client: httpx.AsyncClient) -> str:
     if _template["url"] and time.time() - _template["at"] < 6 * 3600:
@@ -34,7 +38,10 @@ async def fetch_raw_tile(z: int, x: int, y: int) -> dict | None:
     async with httpx.AsyncClient(follow_redirects=True) as client:
         tpl = await _tile_template(client)
         url = tpl.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))
-        r = await client.get(url, headers=HEADERS, timeout=25)
+        # CGU OpenFreeMap : au plus 4 requêtes simultanées vers le service. Le cache SQLite
+        # évite d'y revenir, mais une rafale de tuiles ne doit jamais dépasser cette borne.
+        async with _UPSTREAM:
+            r = await client.get(url, headers=HEADERS, timeout=25)
         if r.status_code in (204, 404):
             return None
         r.raise_for_status()

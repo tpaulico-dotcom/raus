@@ -502,7 +502,8 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
   H = (x: number, z: number) => sampleGrid(ter.h, ter.size, x / mpt + gx0 - t.x, z / mpt + gy0 - t.y);
   let groundImage: ImageBitmap | null = null;
   if (typeof OffscreenCanvas !== "undefined") {
-    const R = 2048, k = R / ext, pxPerM = R / mpt;
+    const paint = (R: number): OffscreenCanvas => {
+    const k = R / ext, pxPerM = R / mpt;
     const cv = new OffscreenCanvas(R, R);
     const g = cv.getContext("2d")!;
     g.fillStyle = "#97a771";
@@ -572,7 +573,20 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
       strokePts(r.pts);
     }
 
-    groundImage = cv.transferToImageBitmap();
+    return cv;
+    };
+    // 2048 px = 0,8 m/px : net à hauteur d'œil. Mais sur une tuile très dense (Marseille,
+    // 5 378 bâtiments) la construction de l'ImageBitmap échoue faute de mémoire vidéo, et la
+    // tuile entière était perdue — un trou définitif dans la ville. On refait la peinture en
+    // 1024 puis 512 au lieu d'abandonner : mieux vaut un sol un peu moins net que pas de sol.
+    for (const scale of [2048, 1024, 512]) {
+      try {
+        groundImage = paint(scale).transferToImageBitmap();
+        break;
+      } catch {
+        /* mémoire vidéo insuffisante à cette résolution : on essaie la suivante */
+      }
+    }
   }
 
   // Trees
@@ -835,7 +849,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
       const nx = bx * sv, nz = bz * sv;
       rectBox(plainWalls, fx, fz, 2.4, 0.35, f.ax, f.az, top - 0.4, top + 2.0, CLOCK_RING);
       rectBox(plainWalls, fx + nx * 0.12, fz + nz * 0.12, 1.9, 0.22, f.ax, f.az, top - 0.15, top + 1.75, CLOCK_FACE);
-      stationSigns.push({ name, x: fx + nx * 0.22, y: top - 2.6, z: fz + nz * 0.22, nx, nz, w: panelW });
+      if (stationSigns.length < 24) stationSigns.push({ name, x: fx + nx * 0.22, y: top - 2.6, z: fz + nz * 0.22, nx, nz, w: panelW });
     }
     monuments.push(cx, base + 0.3, cz, Math.max(24, f.L * 0.8));
   };
@@ -906,7 +920,11 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
     }
 
     // Château détecté par POI : toutes les ailes dans un rayon de 45 m prennent le style château
-    const castleHit = castlePois.find((p) => pointInRing(p.x, p.z, outer) || Math.hypot(p.x - bcx, p.z - bcz) < 45);
+    // `used` : un POI ne doit habiller QU'UN bâtiment. Sans ce filtre, chaque maison à moins
+    // de 55 m d'un arrêt de tram devenait une « gare » — et la planche de panneaux, une ligne
+    // de 140 px par panneau, grossissait jusqu'à ne plus pouvoir être convertie en ImageBitmap
+    // (tuile entière perdue : le trou de Marseille).
+    const castleHit = castlePois.find((p) => !p.used && (pointInRing(p.x, p.z, outer) || Math.hypot(p.x - bcx, p.z - bcz) < 45));
     if (castleHit) {
       castleHit.used = true;
       buildCastle(outer, base, rel);
@@ -914,7 +932,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
     }
 
     // Gare détectée par POI : tout le complexe voyageurs + halle dans un rayon de 55 m prend le style gare
-    const stationHit = stationPois.find((p) => pointInRing(p.x, p.z, outer) || Math.hypot(p.x - bcx, p.z - bcz) < 55);
+    const stationHit = stationPois.find((p) => !p.used && (pointInRing(p.x, p.z, outer) || Math.hypot(p.x - bcx, p.z - bcz) < 55));
     if (stationHit) {
       stationHit.used = true;
       buildStation(outer, base, rel, stationHit.name);
@@ -1056,7 +1074,11 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
       addT([bx, s.y, bz, 0, vBot], [ex, s.y, ez, 1, vBot], [ex, s.y + ph, ez, 1, vTop]);
       addT([bx, s.y, bz, 0, vBot], [ex, s.y + ph, ez, 1, vTop], [bx, s.y + ph, bz, 0, vTop]);
     });
-    stationAtlas = cv.transferToImageBitmap();
+    try {
+      stationAtlas = cv.transferToImageBitmap();
+    } catch {
+      stationAtlas = null; // panneau perdu, tuile conservée
+    }
   }
 
   const places: WorldPlace[] = (t.places ?? []).map((p) => {
