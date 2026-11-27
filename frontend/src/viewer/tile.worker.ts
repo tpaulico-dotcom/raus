@@ -97,12 +97,14 @@ const SPIRE = lin("#5f6873");
 const WHITE = [1, 1, 1];
 const AREA_HEX: Record<string, string> = {
   residential: "#8fa66a", urban: "#b4b0a4", farmland: "#b9b37c", cemetery: "#8ea07a", wood: "#5a7d3c", grass: "#86ad5e",
-  sand: "#e0d3a3", rock: "#a49e93", pitch: "#6aa955", park: "#79a656", plaza: "#d2c9b6",
+  sand: "#e9d9a6", rock: "#a49e93", pitch: "#6aa955", park: "#79a656", plaza: "#d2c9b6",
 };
 
 const AREA_ORDER: Record<string, number> = {
   residential: 1, urban: 2, farmland: 3, cemetery: 4, wood: 5, grass: 6,
-  sand: 6, rock: 6, pitch: 7, park: 8, plaza: 9, water: 10,
+  // Le sable passe APRÈS l'eau : la plage d'OSM chevauche le polygone de mer, et peinte avant
+  // elle disparaissait sous le bleu — la mer semblait venir buter sur les immeubles.
+  rock: 6, pitch: 7, park: 8, plaza: 9, water: 10, sand: 11,
 };
 
 const ROAD_STYLE: Record<string, { mat: RoadMat; w: number; walk?: boolean; order: number; color: string; dashed?: boolean }> = {
