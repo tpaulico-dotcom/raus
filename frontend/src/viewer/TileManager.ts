@@ -58,7 +58,6 @@ interface Entry {
   bounds?: { minx: number; minz: number; maxx: number; maxz: number };
 }
 
-const leafyGeo = new THREE.IcosahedronGeometry(1, 1).translate(0, 0, 0);
 const coniferGeo = new THREE.ConeGeometry(1, 2.6, 7).translate(0, 1.3, 0);
 const trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 1, 5).translate(0, 0.5, 0);
 const poolGeo = new THREE.PlaneGeometry(13, 13);
@@ -79,7 +78,6 @@ function makeLampPoolTex(): THREE.CanvasTexture {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-const LEAF = ["#4d7a32", "#3f6b2a", "#5e8a3a", "#6b9440", "#557f36"].map((c) => new THREE.Color(c));
 const CONIFER = ["#2f5a2e", "#2b4f2a", "#36622f"].map((c) => new THREE.Color(c));
 
 function geometry(m: MeshArrays, withUv = true) {
@@ -209,18 +207,10 @@ export class TileManager {
     // En survol (ou en altitude), on porte à 4 tuiles devant (~6,5 km), 2 sur les côtés,
     // tout en gardant TOUJOURS les 9 tuiles immédiates (ring <= 1) intactes autour de soi.
     const isFly = fly || altitude > 35;
-    // En survol les arbres ne se distinguent plus du sol : on masque ceux déjà construits.
-    // Aucune reconstruction au décollage ; au retour au sol, seules les tuiles construites
-    // en l'air sont refaites avec leurs arbres.
-    if (isFly !== this.hideTrees) {
-      this.hideTrees = isFly;
-      for (const e of this.tiles.values()) {
-        if (!e.group) continue;
-        e.group.traverse((o) => {
-          if (o.userData.tree) o.visible = !isFly;
-        });
-      }
-    }
+    // En survol, les arbres des forêts RESTENT : sans eux la forêt devient une plaque verte
+    // plate. Ils sont construits sans tronc et plus serrés ; les arbres de ville, eux, ne sont
+    // plus semés du tout (BuildRequest.trees = false). On ne masque donc plus rien au décollage.
+    if (isFly !== this.hideTrees) this.hideTrees = isFly;
     // Le rayon de préchargement suit l'altitude : à 45 m en survol on ne voit pas à 6 km, et
     // charger 40 tuiles détaillées pour rien bloquait l'arrivée sur une grande ville.
     const radius = !isFly ? 1 : altitude > 400 ? 4 : altitude > 150 ? 2 : 1;
@@ -414,40 +404,34 @@ export class TileManager {
 
     const n = b.trees.length / 6;
     if (n > 0) {
-      const leafyIdx: number[] = [], conIdx: number[] = [];
-      for (let i = 0; i < n; i++) (b.trees[i * 6 + 4] > 0.5 ? conIdx : leafyIdx).push(i);
-      const trunks = new THREE.InstancedMesh(trunkGeo, this.mats.trunk, n);
-      const leafy = new THREE.InstancedMesh(leafyGeo, this.mats.leaves, Math.max(1, leafyIdx.length));
-      const conifer = new THREE.InstancedMesh(coniferGeo, this.mats.leaves, Math.max(1, conIdx.length));
+      // Un seul type d'arbre : le sapin. Deux essences coûtaient un InstancedMesh de plus par
+      // tuile (matrices + couleurs) pour un détail invisible à distance en survol.
+      // En survol on ne construit pas les troncs : invisible d'en haut, un InstancedMesh de
+      // moins par tuile sur les 40 tuiles de la couronne.
+      const withTrunk = !this.hideTrees;
+      const trunks = withTrunk ? new THREE.InstancedMesh(trunkGeo, this.mats.trunk, n) : null;
+      const conifer = new THREE.InstancedMesh(coniferGeo, this.mats.leaves, n);
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-      for (let i = 0; i < n; i++) {
-        const x = b.trees[i * 6], y = b.trees[i * 6 + 1], z = b.trees[i * 6 + 2], sc = b.trees[i * 6 + 3];
-        const con = b.trees[i * 6 + 4] > 0.5;
-        m4.compose(p.set(x, y, z), q.identity(), s.set(sc, (con ? 4 : 3) * sc, sc));
-        trunks.setMatrixAt(i, m4);
+      if (trunks) {
+        for (let i = 0; i < n; i++) {
+          const x = b.trees[i * 6], y = b.trees[i * 6 + 1], z = b.trees[i * 6 + 2], sc = b.trees[i * 6 + 3];
+          m4.compose(p.set(x, y, z), q.identity(), s.set(sc, 4 * sc, sc));
+          trunks.setMatrixAt(i, m4);
+        }
       }
-      leafyIdx.forEach((i, j) => {
-        const x = b.trees[i * 6], y = b.trees[i * 6 + 1], z = b.trees[i * 6 + 2], sc = b.trees[i * 6 + 3] * 3.2, sh = b.trees[i * 6 + 5];
-        m4.compose(p.set(x, y + 2.4 * (sc / 3.2) + sc * 0.7, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), sh * 6), s.set(sc, sc * 0.9, sc));
-        leafy.setMatrixAt(j, m4);
-        leafy.setColorAt(j, LEAF[Math.floor(sh * LEAF.length)]);
-      });
-      conIdx.forEach((i, j) => {
+      for (let i = 0; i < n; i++) {
         const x = b.trees[i * 6], y = b.trees[i * 6 + 1], z = b.trees[i * 6 + 2], sc = b.trees[i * 6 + 3] * 2.6, sh = b.trees[i * 6 + 5];
         m4.compose(p.set(x, y + 1.5 * (sc / 2.6), z), q.identity(), s.set(sc, sc * 1.6, sc));
-        conifer.setMatrixAt(j, m4);
-        conifer.setColorAt(j, CONIFER[Math.floor(sh * CONIFER.length)]);
-      });
-      leafy.count = leafyIdx.length;
-      conifer.count = conIdx.length;
-      for (const im of [trunks, leafy, conifer]) {
-        // Pas d'ombre portée : c'était la vraie dépense GPU des arbres (3 passes d'ombre par
-        // tuile) pour un gain invisible au sol.
+        conifer.setMatrixAt(i, m4);
+        conifer.setColorAt(i, CONIFER[Math.floor(sh * CONIFER.length)]);
+      }
+      conifer.count = n;
+      for (const im of trunks ? [trunks, conifer] : [conifer]) {
+        // Pas d'ombre portée : c'était la vraie dépense GPU des arbres (passes d'ombre par tuile).
         im.castShadow = false;
         im.receiveShadow = true;
         im.computeBoundingSphere();
         im.userData.tree = true;
-        im.visible = !this.hideTrees;
         g.add(im);
       }
     }
@@ -571,6 +555,18 @@ export class TileManager {
       }
     }
     return null;
+  }
+
+  /** Vrai si un tronc se trouve à moins de 0,6 m : en forêt on slalome entre les arbres. */
+  trunkAt(x: number, z: number): boolean {
+    for (const b of this.near(x, z, 8)) {
+      const t = b.trees, n = t.length / 6;
+      for (let i = 0; i < n; i++) {
+        const dx = x - t[i * 6], dz = z - t[i * 6 + 2];
+        if (dx * dx + dz * dz < 0.36) return true;
+      }
+    }
+    return false;
   }
 
   streetAt(x: number, z: number): string | null {

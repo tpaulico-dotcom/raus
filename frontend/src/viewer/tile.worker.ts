@@ -529,6 +529,44 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
       g.fill("evenodd");
     }
 
+    // Forêt : vert profond + moucheture de feuillage. OSM répertorie ces zones (landcover=wood),
+    // on s'en sert pour les assombrir et les texturer — c'est ce qui distingue une forêt d'un pré.
+    const wg = rng(t.x * 7919 + t.y * 131);
+    for (const a of t.areas) {
+      if (a.kind !== "wood") continue;
+      const r0 = a.rings[0];
+      if (!r0 || r0.length < 6) continue;
+      let minx = Infinity, minz = Infinity, maxx = -Infinity, maxz = -Infinity;
+      for (let i = 0; i < r0.length; i += 2) {
+        if (r0[i] < minx) minx = r0[i];
+        if (r0[i] > maxx) maxx = r0[i];
+        if (r0[i + 1] < minz) minz = r0[i + 1];
+        if (r0[i + 1] > maxz) maxz = r0[i + 1];
+      }
+      const bw = (maxx - minx) * k, bh = (maxz - minz) * k;
+      if (bw < 2 || bh < 2) continue;
+      g.save();
+      g.beginPath();
+      for (const r of a.rings) {
+        for (let i = 0; i < r.length; i += 2) (i ? g.lineTo : g.moveTo).call(g, r[i] * k, r[i + 1] * k);
+        g.closePath();
+      }
+      g.clip("evenodd");
+      g.fillStyle = "#2c4723";
+      g.fillRect(0, 0, R, R);
+      // Une moucheture tous les ~30 px : la densité suit la surface de la forêt, donc une
+      // grande forêt n'est pas plus lisse qu'un petit bois.
+      const sc = R / 2048;
+      const n = Math.min(700, Math.max(30, Math.floor((bw * bh) / 900)));
+      for (let i = 0; i < n; i++) {
+        g.fillStyle = wg() < 0.5 ? "rgba(20,38,16,0.42)" : "rgba(78,116,56,0.34)";
+        g.beginPath();
+        g.arc((minx * k) + wg() * bw, (minz * k) + wg() * bh, (5 + wg() * 15) * sc, 0, 6.2832);
+        g.fill();
+      }
+      g.restore();
+    }
+
     // Subtle organic texture on terrain (fast 2x2 block noise on 2048x2048)
     const img = g.getImageData(0, 0, R, R);
     const d = img.data, nr = rng(t.x * 31 + t.y * 17);
@@ -598,24 +636,37 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
 
   // Trees
   const rand = rng(t.x * 92821 + t.y);
-  // Budget serré : les arbres coûtent 3 InstancedMesh par tuile (matrices + couleurs). En survol
-  // ils ne se distinguent plus du sol, donc le client demande explicitement zéro arbre.
-  let treeBudget = coarse || req.trees === false ? 0 : 1200;
+  // Au sol : toutes les zones (forêts, parcs, cimetières) et budget large, il faut du volume.
+  // En survol : seulement les forêts, budget serré — une forêt sans un seul arbre fait une
+  // plaque verte plate, mais les arbres de ville, eux, ne se voient pas d'en haut.
+  const allTrees = !coarse && req.trees !== false;
+  let treeBudget = coarse ? 0 : allTrees ? 20000 : 6000;
   t.areas.forEach((a) => {
-    const density = a.kind === "wood" ? 1 / 110 : a.kind === "park" ? 1 / 320 : a.kind === "cemetery" ? 1 / 500 : 0;
+    if (!allTrees && a.kind !== "wood") return;
+    const density = a.kind === "wood" ? 1 / 25 : a.kind === "park" ? 1 / 320 : a.kind === "cemetery" ? 1 / 500 : 0;
     if (!density || treeBudget <= 0) return;
     const outer = ring(a.rings[0]);
     if (outer.length < 3) return;
     const area = Math.abs(signedArea(outer));
     let count = Math.min(treeBudget, Math.floor(area * density));
     treeBudget -= count;
+    // Contour décimé : tirer 20 000 points au hasard dans un anneau de 5 000 sommets coûtait
+    // des minutes (pointInRing est linéaire). À 160 sommets l'erreur de contour reste < 2 m,
+    // invisible pour un semis d'arbres.
+    let poly = outer;
+    if (poly.length > 160) {
+      const step = Math.ceil(poly.length / 160);
+      const dec: [number, number][] = [];
+      for (let i = 0; i < poly.length; i += step) dec.push(poly[i]);
+      poly = dec;
+    }
     let minx = Infinity, minz = Infinity, maxx = -Infinity, maxz = -Infinity;
-    for (const p of outer) { minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); minz = Math.min(minz, p[1]); maxz = Math.max(maxz, p[1]); }
-    let guard = count * 4;
+    for (const p of poly) { minx = Math.min(minx, p[0]); maxx = Math.max(maxx, p[0]); minz = Math.min(minz, p[1]); maxz = Math.max(maxz, p[1]); }
+    let guard = count * 2;
     while (count > 0 && guard-- > 0) {
       const x = minx + rand() * (maxx - minx), z = minz + rand() * (maxz - minz);
-      if (!pointInRing(x, z, outer)) continue;
-      trees.push(x, H(x, z), z, 0.75 + rand() * 0.6, a.kind === "wood" && rand() < 0.45 ? 1 : 0, rand());
+      if (!pointInRing(x, z, poly)) continue;
+      trees.push(x, H(x, z), z, 0.6 + rand() * 0.9, 1, rand());
       count--;
     }
   });

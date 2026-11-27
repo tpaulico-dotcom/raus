@@ -574,7 +574,8 @@ export class Engine {
       !!this.tiles.buildingAt(x + r, z) ||
       !!this.tiles.buildingAt(x - r, z) ||
       !!this.tiles.buildingAt(x, z + r) ||
-      !!this.tiles.buildingAt(x, z - r)
+      !!this.tiles.buildingAt(x, z - r) ||
+      this.tiles.trunkAt(x, z)
     );
   }
 
