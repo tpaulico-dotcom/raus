@@ -50,6 +50,7 @@ interface Entry {
   priority: number;
   retries: number;
   retryAt: number;
+  lod: "detail" | "coarse";
   group?: THREE.Group;
   build?: TileBuild;
   minH?: number;
@@ -101,6 +102,7 @@ export class TileManager {
   private inflight = 0;
   private waiters = new Map<string, Array<() => void>>();
   private aniso = 8;
+  private coarse = false;
   private groundMats = new Map<string, THREE.MeshStandardMaterial>();
   private monumentPool = new THREE.MeshBasicMaterial({ map: makeLampPoolTex(), color: "#ffd896", transparent: true, opacity: 0, visible: false, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
   onError?: (msg: string) => void;
@@ -206,8 +208,15 @@ export class TileManager {
     // En survol (ou en altitude), on porte à 4 tuiles devant (~6,5 km), 2 sur les côtés,
     // tout en gardant TOUJOURS les 9 tuiles immédiates (ring <= 1) intactes autour de soi.
     const isFly = fly || altitude > 35;
-    const radius = isFly ? 4 : 1;
-    const want = new Map<string, { x: number; y: number; pr: number; ant: boolean }>();
+    // Le rayon de préchargement suit l'altitude : à 45 m en survol on ne voit pas à 6 km, et
+    // charger 40 tuiles détaillées pour rien bloquait l'arrivée sur une grande ville.
+    const radius = !isFly ? 1 : altitude > 400 ? 4 : altitude > 150 ? 2 : 1;
+    // Niveau de détail : au-dessus de 250 m, les tuiles passent en allégé (terrain, eau, grands
+    // axes, noms de villes — sans bâtiments). Hystérésis à 200 m en descente : sans elle, une
+    // altitude qui oscille autour du seuil relancerait les mêmes tuiles sans arrêt.
+    if (altitude > 250) this.coarse = true;
+    else if (altitude < 200) this.coarse = false;
+    const want = new Map<string, { x: number; y: number; pr: number; ant: boolean; lod: "detail" | "coarse" }>();
     const mpt = this.origin.mpt;
     const capSur = Number.isFinite(yaw) ? yaw : 0;
     const fx = -Math.sin(capSur), fz = -Math.cos(capSur);
@@ -224,8 +233,9 @@ export class TileManager {
         if (ring > maxRing) return;
       }
       const pr = dist - along * mpt * 2.0 + bias;
+      const lod: "detail" | "coarse" = this.coarse ? "coarse" : "detail";
       const prev = want.get(k);
-      if (!prev || pr < prev.pr) want.set(k, { x, y, pr, ant: anticipated && !(prev && !prev.ant) });
+      if (!prev || pr < prev.pr) want.set(k, { x, y, pr, ant: anticipated && !(prev && !prev.ant), lod });
     };
     for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) consider(tx + dx, ty + dy, false, 0);
 
@@ -250,11 +260,18 @@ export class TileManager {
     for (const [k, w] of want) {
       let e = this.tiles.get(k);
       if (!e) {
-        e = { key: k, x: w.x, y: w.y, status: w.ant ? "anticipated" : "queued", anticipated: w.ant, priority: w.pr, retries: 0, retryAt: 0 };
+        e = { key: k, x: w.x, y: w.y, status: w.ant ? "anticipated" : "queued", anticipated: w.ant, priority: w.pr, retries: 0, retryAt: 0, lod: w.lod };
         this.tiles.set(k, e);
       } else {
         e.priority = w.pr;
         if (e.status === "error" && now > e.retryAt && e.retries < 4) e.status = "queued";
+        // Changement de niveau de détail : on reconstruit la tuile (le bâti apparaît ou
+        // disparaît). Jamais pendant qu'elle se construit, sinon on jette son travail.
+        if (e.lod !== w.lod && e.status !== "loading") {
+          e.lod = w.lod;
+          e.status = "queued";
+          e.retries = 0;
+        }
       }
     }
 
@@ -280,7 +297,7 @@ export class TileManager {
       const e = queue.shift()!;
       e.status = "loading";
       this.inflight++;
-      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt } });
+      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt }, lod: e.lod });
     }
   }
 

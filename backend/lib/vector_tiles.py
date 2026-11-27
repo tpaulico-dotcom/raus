@@ -123,8 +123,12 @@ POI_CLASSES = {"place_of_worship", "town_hall", "museum", "castle", "monument", 
                "school", "hospital", "railway", "townhall", "stadium", "zoo"}
 PLACE_CLASSES = {"city", "town", "village", "hamlet", "suburb", "neighbourhood"}
 
+# Vue lointaine (survol haut) : seuls ces axes sont envoyés. Le reste — rues de quartier,
+# chemins, bâtiments, numéros, noms de rue — n'est pas visible à cette distance.
+MAJOR_KINDS = {"motorway", "trunk", "primary", "secondary"}
 
-def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
+
+def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) -> dict:
     out: dict[str, Any] = {"z": z, "x": x, "y": y, "extent": EXTENT, "buildings": [], "roads": [],
                            "waterways": [], "areas": [], "names": [], "pois": [], "places": []}
     if not raw:
@@ -133,20 +137,21 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
 
     # POIs (needed first: churches mark their building)
     churches: list[Point] = []
-    for f in raw.get("poi", {}).get("features", []):
-        p = f.get("properties", {})
-        g = f.get("geometry", {})
-        if g.get("type") != "Point":
-            continue
-        cx, cy = g["coordinates"]
-        cls = p.get("class", "")
-        if cls == "place_of_worship" and p.get("subclass") == "christian":
-            churches.append(Point(cx, cy))
-        if not (0 <= cx < EXTENT and 0 <= cy < EXTENT):
-            continue
-        name = p.get("name")
-        if name and cls in POI_CLASSES:
-            out["pois"].append({"name": name, "kind": cls, "x": int(cx), "y": int(cy)})
+    if not coarse:
+        for f in raw.get("poi", {}).get("features", []):
+            p = f.get("properties", {})
+            g = f.get("geometry", {})
+            if g.get("type") != "Point":
+                continue
+            cx, cy = g["coordinates"]
+            cls = p.get("class", "")
+            if cls == "place_of_worship" and p.get("subclass") == "christian":
+                churches.append(Point(cx, cy))
+            if not (0 <= cx < EXTENT and 0 <= cy < EXTENT):
+                continue
+            name = p.get("name")
+            if name and cls in POI_CLASSES:
+                out["pois"].append({"name": name, "kind": cls, "x": int(cx), "y": int(cy)})
 
     # Lieux habités : nom + rang, pour les étiquettes de villes en vue aérienne
     for f in raw.get("place", {}).get("features", []):
@@ -164,7 +169,7 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
                               "rank": int(rank) if isinstance(rank, (int, float)) else 99})
 
     # Buildings: keep a building in the tile owning its centroid (no duplicates across tiles)
-    for f in raw.get("building", {}).get("features", []):
+    for f in ([] if coarse else raw.get("building", {}).get("features", [])):
         p = f.get("properties", {})
         if p.get("hide_3d"):
             continue
@@ -193,7 +198,7 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
     for f in raw.get("transportation", {}).get("features", []):
         p = f.get("properties", {})
         kind = ROAD_KIND.get(p.get("class", ""))
-        if not kind:
+        if not kind or (coarse and kind not in MAJOR_KINDS):
             continue
         brunnel = p.get("brunnel")
         if kind == "path" and p.get("subclass") in ("pedestrian",) and f["geometry"]["type"] in ("Polygon", "MultiPolygon"):
@@ -219,7 +224,7 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
                                      "pts": _flat(ln.coords)})
 
     # Street names (for the HUD "you are on ..." label)
-    for f in raw.get("transportation_name", {}).get("features", []):
+    for f in ([] if coarse else raw.get("transportation_name", {}).get("features", [])):
         p = f.get("properties", {})
         name = p.get("name")
         if not name or f["geometry"]["type"] not in ("LineString", "MultiLineString"):
@@ -255,10 +260,10 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None) -> dict:
                 continue
             clipped = g.intersection(Polygon.from_bounds(*box))
             for poly in _polys(clipped):
-                if poly.area < 20:
+                if poly.area < (400 if coarse else 20):
                     continue
-                if len(poly.exterior.coords) > 400:
-                    poly = poly.simplify(1.5)
+                if len(poly.exterior.coords) > (120 if coarse else 400):
+                    poly = poly.simplify(4.0 if coarse else 1.5)
                     if poly.is_empty or poly.geom_type != "Polygon":
                         continue
                 out["areas"].append({"kind": kind, "rings": _rings(poly)})

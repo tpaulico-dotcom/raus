@@ -68,6 +68,7 @@ export interface BuildRequest {
   y: number;
   epoch: number;
   origin: { gx0: number; gy0: number; mpt: number };
+  lod?: "detail" | "coarse";
 }
 
 export type WorkerReply =

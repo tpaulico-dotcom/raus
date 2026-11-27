@@ -12,24 +12,27 @@ const ctx = self as unknown as Worker;
 // ---------- raw data cache (survives teleports: only the build depends on the origin) ----------
 const raw = new Map<string, TileData>();
 const pending = new Map<string, Promise<TileData>>();
-function getTile(key: string, x: number, y: number): Promise<TileData> {
-  const hit = raw.get(key);
+function getTile(key: string, x: number, y: number, lod: "detail" | "coarse" = "detail"): Promise<TileData> {
+  // La clé de cache porte le niveau de détail : la même tuile existe en version complète
+  // (bâtiments) et en version allégée (terrain + grands axes), et les deux doivent coexister.
+  const ck = `${key}|${lod}`;
+  const hit = raw.get(ck);
   if (hit) {
-    raw.delete(key);
-    raw.set(key, hit);
+    raw.delete(ck);
+    raw.set(ck, hit);
     return Promise.resolve(hit);
   }
-  let p = pending.get(key);
+  let p = pending.get(ck);
   if (!p) {
     p = tileVersion()
-      .then((v) => apiGet<TileData>(`/tiles/${TILE_Z}/${x}/${y}?v=${v}`))
+      .then((v) => apiGet<TileData>(`/tiles/${TILE_Z}/${x}/${y}?v=${v}&lod=${lod}`))
       .then((d) => {
-      raw.set(key, d);
+      raw.set(ck, d);
       if (raw.size > 80) raw.delete(raw.keys().next().value as string);
       return d;
     });
-    p.finally(() => pending.delete(key)).catch(() => undefined);
-    pending.set(key, p);
+    p.finally(() => pending.delete(ck)).catch(() => undefined);
+    pending.set(ck, p);
   }
   return p;
 }
@@ -473,6 +476,9 @@ function faceQuad(acc: Acc, at: Pt, nx: number, nz: number, halfW: number, y0: n
 // ---------- main build ----------
 function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: number }): TileBuild {
   const t0 = performance.now();
+  // Tuile allégée : vue lointaine. Le backend n'a envoyé ni bâtiment, ni POI, ni nom de rue ;
+  // ici on se contente d'un sol moins fin et on supprime arbres et cimetières.
+  const coarse = req.lod === "coarse";
   const { gx0, gy0, mpt } = req.origin;
   const ext = t.extent;
   const toW = (flat: number[]): Pt[] => {
@@ -579,7 +585,8 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
     // 5 378 bâtiments) la construction de l'ImageBitmap échoue faute de mémoire vidéo, et la
     // tuile entière était perdue — un trou définitif dans la ville. On refait la peinture en
     // 1024 puis 512 au lieu d'abandonner : mieux vaut un sol un peu moins net que pas de sol.
-    for (const scale of [2048, 1024, 512]) {
+    const base = coarse ? 512 : 2048;
+    for (const scale of [base, base / 2, 256]) {
       try {
         groundImage = paint(scale).transferToImageBitmap();
         break;
@@ -591,7 +598,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
 
   // Trees
   const rand = rng(t.x * 92821 + t.y);
-  let treeBudget = 2200;
+  let treeBudget = coarse ? 0 : 2200;
   t.areas.forEach((a) => {
     const density = a.kind === "wood" ? 1 / 110 : a.kind === "park" ? 1 / 320 : a.kind === "cemetery" ? 1 / 500 : 0;
     if (!density || treeBudget <= 0) return;
@@ -619,9 +626,9 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
   const CRYPT_DOOR = lin("#2e3034");
   const CEM_WALL = lin("#b5b0a6");
   const CEM_TILE = lin("#a64b35");
-  let crossBudget = 2200;
+  let crossBudget = coarse ? 0 : 2200;
   for (const a of t.areas) {
-    if (a.kind !== "cemetery") continue;
+    if (a.kind !== "cemetery" || crossBudget <= 0) continue;
     const outer = ring(a.rings[0]);
     if (outer.length < 3) continue;
     // Mur d'enceinte en pierre (2,70 m de haut) surmonté d'un chaperon à 2 pans en tuiles.
@@ -1132,7 +1139,7 @@ ctx.onmessage = async (e: MessageEvent<BuildRequest>) => {
   const req = e.data;
   if (req.type !== "build") return;
   try {
-    const [data, ter] = await Promise.all([getTile(req.key, req.x, req.y), getTerrain(req.key, req.x, req.y)]);
+    const [data, ter] = await Promise.all([getTile(req.key, req.x, req.y, req.lod ?? "detail"), getTerrain(req.key, req.x, req.y)]);
     const b = build(req, data, ter);
     const reply: WorkerReply = { type: "built", build: b };
     ctx.postMessage(reply, transferables(b));

@@ -27,9 +27,9 @@ _inflight: dict[str, asyncio.Future] = {}
 _geo_cache: dict[str, list[dict]] = {}
 
 
-def _encode(z: int, x: int, y: int, raw: dict | None, emp: list[dict] | None = None) -> bytes:
-    reduced = reduce_tile(z, x, y, raw)
-    if emp:
+def _encode(z: int, x: int, y: int, raw: dict | None, emp: list[dict] | None = None, coarse: bool = False) -> bytes:
+    reduced = reduce_tile(z, x, y, raw, coarse=coarse)
+    if emp and not coarse:
         boites = []
         for b in reduced.get("buildings") or []:
             for f in b.get("rings") or []:
@@ -68,13 +68,16 @@ def _json(body: bytes) -> Response:
 
 
 @router.get("/tiles/{z}/{x}/{y}", response_model=TileData)
-async def get_tile(z: int, x: int, y: int):
+async def get_tile(z: int, x: int, y: int, lod: str = Query("detail", pattern="^(detail|coarse)$")):
+    """`lod=coarse` : tuile allégée pour la vue lointaine (terrain, eau, grands axes, noms de
+    villes — sans bâtiments ni POI). 95 % moins de calcul et de poids, pour un survol fluide."""
     if z != TILE_ZOOM:
         raise HTTPException(status_code=400, detail=f"only zoom {TILE_ZOOM} is served")
     n = 2 ** z
     if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(status_code=404, detail="tile out of range")
-    key = f"v{CACHE_VERSION}/{z}/{x}/{y}"
+    coarse = lod == "coarse"
+    key = f"v{CACHE_VERSION}/{lod}/{z}/{x}/{y}"
     cached = cache.get("tiles", key)
     if cached:
         return _json(zlib.decompress(cached))
@@ -85,9 +88,9 @@ async def get_tile(z: int, x: int, y: int):
         _inflight[key] = fut
         try:
             raw = await fetch_raw_tile(z, x, y)
-            data = await asyncio.to_thread(_encode, z, x, y, raw, None)
+            data = await asyncio.to_thread(_encode, z, x, y, raw, None, coarse)
             cache.put("tiles", key, zlib.compress(data, 6), ttl=TILE_TTL)
-            if not raw or len(raw.get("building", {}).get("features", [])) < 5:
+            if not coarse and (not raw or len(raw.get("building", {}).get("features", [])) < 5):
                 asyncio.get_running_loop().create_task(_fill_empreintes(z, x, y, key))
             fut.set_result(data)
         except Exception as exc:
