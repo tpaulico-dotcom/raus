@@ -19,6 +19,10 @@ Moteur 3D temps réel du monde entier en **Three.js + FastAPI**, ultra-léger, *
 | :---: | :---: |
 | ![Survol de La Paz](docs/screenshots/02-la-paz.webp) | ![Survol de Nantes](docs/screenshots/03-nantes.webp) |
 
+**À pied — Lisbonne, Calçada do Carmo (rues étroites, relief et façades à hauteur d'homme)**
+
+![Lisbonne à pied](docs/screenshots/04-lisbonne.webp)
+
 ## Sources de données (100 % gratuites & monde entier)
 
 | Couche | Source | Clé API |
