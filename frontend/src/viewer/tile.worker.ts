@@ -598,7 +598,9 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
 
   // Trees
   const rand = rng(t.x * 92821 + t.y);
-  let treeBudget = coarse ? 0 : 2200;
+  // Budget serré : les arbres coûtent 3 InstancedMesh par tuile (matrices + couleurs). En survol
+  // ils ne se distinguent plus du sol, donc le client demande explicitement zéro arbre.
+  let treeBudget = coarse || req.trees === false ? 0 : 1200;
   t.areas.forEach((a) => {
     const density = a.kind === "wood" ? 1 / 110 : a.kind === "park" ? 1 / 320 : a.kind === "cemetery" ? 1 / 500 : 0;
     if (!density || treeBudget <= 0) return;

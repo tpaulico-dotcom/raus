@@ -69,6 +69,8 @@ export interface BuildRequest {
   epoch: number;
   origin: { gx0: number; gy0: number; mpt: number };
   lod?: "detail" | "coarse";
+  /** false = pas d'arbres (survol) : ils ne se voient pas d'en haut et coûtent cher. */
+  trees?: boolean;
 }
 
 export type WorkerReply =

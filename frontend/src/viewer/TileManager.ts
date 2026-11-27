@@ -51,6 +51,7 @@ interface Entry {
   retries: number;
   retryAt: number;
   lod: "detail" | "coarse";
+  trees: boolean;
   group?: THREE.Group;
   build?: TileBuild;
   minH?: number;
@@ -102,6 +103,7 @@ export class TileManager {
   private inflight = 0;
   private waiters = new Map<string, Array<() => void>>();
   private aniso = 8;
+  private hideTrees = false;
   private groundMats = new Map<string, THREE.MeshStandardMaterial>();
   private monumentPool = new THREE.MeshBasicMaterial({ map: makeLampPoolTex(), color: "#ffd896", transparent: true, opacity: 0, visible: false, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
   onError?: (msg: string) => void;
@@ -207,10 +209,22 @@ export class TileManager {
     // En survol (ou en altitude), on porte à 4 tuiles devant (~6,5 km), 2 sur les côtés,
     // tout en gardant TOUJOURS les 9 tuiles immédiates (ring <= 1) intactes autour de soi.
     const isFly = fly || altitude > 35;
+    // En survol les arbres ne se distinguent plus du sol : on masque ceux déjà construits.
+    // Aucune reconstruction au décollage ; au retour au sol, seules les tuiles construites
+    // en l'air sont refaites avec leurs arbres.
+    if (isFly !== this.hideTrees) {
+      this.hideTrees = isFly;
+      for (const e of this.tiles.values()) {
+        if (!e.group) continue;
+        e.group.traverse((o) => {
+          if (o.userData.tree) o.visible = !isFly;
+        });
+      }
+    }
     // Le rayon de préchargement suit l'altitude : à 45 m en survol on ne voit pas à 6 km, et
     // charger 40 tuiles détaillées pour rien bloquait l'arrivée sur une grande ville.
     const radius = !isFly ? 1 : altitude > 400 ? 4 : altitude > 150 ? 2 : 1;
-    const want = new Map<string, { x: number; y: number; pr: number; ant: boolean; lod: "detail" | "coarse" }>();
+    const want = new Map<string, { x: number; y: number; pr: number; ant: boolean; lod: "detail" | "coarse"; trees: boolean }>();
     const mpt = this.origin.mpt;
     const capSur = Number.isFinite(yaw) ? yaw : 0;
     const fx = -Math.sin(capSur), fz = -Math.cos(capSur);
@@ -234,7 +248,7 @@ export class TileManager {
       const lim = 3000 + 1000 * Math.max(0, along);
       const lod: "detail" | "coarse" = dist > lim ? "coarse" : "detail";
       const prev = want.get(k);
-      if (!prev || pr < prev.pr) want.set(k, { x, y, pr, ant: anticipated && !(prev && !prev.ant), lod });
+      if (!prev || pr < prev.pr) want.set(k, { x, y, pr, ant: anticipated && !(prev && !prev.ant), lod, trees: !isFly });
     };
     for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) consider(tx + dx, ty + dy, false, 0);
 
@@ -259,7 +273,7 @@ export class TileManager {
     for (const [k, w] of want) {
       let e = this.tiles.get(k);
       if (!e) {
-        e = { key: k, x: w.x, y: w.y, status: w.ant ? "anticipated" : "queued", anticipated: w.ant, priority: w.pr, retries: 0, retryAt: 0, lod: w.lod };
+        e = { key: k, x: w.x, y: w.y, status: w.ant ? "anticipated" : "queued", anticipated: w.ant, priority: w.pr, retries: 0, retryAt: 0, lod: w.lod, trees: w.trees };
         this.tiles.set(k, e);
       } else {
         e.priority = w.pr;
@@ -270,6 +284,12 @@ export class TileManager {
           e.lod = w.lod;
           e.status = "queued";
           e.retries = 0;
+        }
+        // Retour au sol : les tuiles construites en survol n'ont pas d'arbres, on les refait.
+        // L'inverse (décoller) ne reconstruit rien : on masque les arbres existants.
+        if (w.trees && !e.trees && e.status !== "loading") {
+          e.trees = true;
+          e.status = "queued";
         }
       }
     }
@@ -296,7 +316,7 @@ export class TileManager {
       const e = queue.shift()!;
       e.status = "loading";
       this.inflight++;
-      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt }, lod: e.lod });
+      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt }, lod: e.lod, trees: e.trees });
     }
   }
 
@@ -421,9 +441,13 @@ export class TileManager {
       leafy.count = leafyIdx.length;
       conifer.count = conIdx.length;
       for (const im of [trunks, leafy, conifer]) {
-        im.castShadow = true;
+        // Pas d'ombre portée : c'était la vraie dépense GPU des arbres (3 passes d'ombre par
+        // tuile) pour un gain invisible au sol.
+        im.castShadow = false;
         im.receiveShadow = true;
         im.computeBoundingSphere();
+        im.userData.tree = true;
+        im.visible = !this.hideTrees;
         g.add(im);
       }
     }
