@@ -3,61 +3,52 @@ import { ShapeUtils, Vector2 } from "three";
 import { apiGet, tileVersion } from "@/lib/api";
 import type { TerrainGrid, TileData } from "@/lib/types";
 import { sampleGrid } from "./terrain";
-import type { BuildRequest, MeshArrays, RoadMat, TileBuild, WorkerReply, WorldPlace, WorldPoi } from "./buildTypes";
+import type { BuildRequest, MeshArrays, RoadMat, TileBuild, WorkerReply, WorkerRequest, WorldPlace, WorldPoi } from "./buildTypes";
 import { ROAD_MATS } from "./buildTypes";
-import { TILE_Z } from "./geo";
+import { N_TILES, TILE_Z, wrapTileX } from "./geo";
 
 const ctx = self as unknown as Worker;
 
 // ---------- raw data cache (survives teleports: only the build depends on the origin) ----------
 const raw = new Map<string, TileData>();
-const pending = new Map<string, Promise<TileData>>();
 const TILE_REQUEST_TIMEOUT = 15_000;
-function getTile(key: string, x: number, y: number, lod: "detail" | "coarse" = "detail"): Promise<TileData> {
-  // La clé de cache porte le niveau de détail : la même tuile existe en version complète
-  // (bâtiments) et en version allégée (terrain + grands axes), et les deux doivent coexister.
-  const ck = `${key}|${lod}`;
-  const hit = raw.get(ck);
+const terr = new Map<string, Float32Array>();
+let destination = new AbortController();
+
+async function getTile(req: BuildRequest, signal: AbortSignal): Promise<TileData> {
+  const lod = req.lod ?? "detail";
+  const key = `${req.key}|${lod}`;
+  const hit = raw.get(key);
   if (hit) {
-    raw.delete(ck);
-    raw.set(ck, hit);
-    return Promise.resolve(hit);
+    raw.delete(key);
+    raw.set(key, hit);
+    return hit;
   }
-  let p = pending.get(ck);
-  if (!p) {
-    p = tileVersion()
-      .then((v) => apiGet<TileData>(`/tiles/${TILE_Z}/${x}/${y}?v=${v}&lod=${lod}`, AbortSignal.timeout(TILE_REQUEST_TIMEOUT)))
-      .then((d) => {
-      raw.set(ck, d);
-      if (raw.size > 80) raw.delete(raw.keys().next().value as string);
-      return d;
-    });
-    p.finally(() => pending.delete(ck)).catch(() => undefined);
-    pending.set(ck, p);
-  }
-  return p;
+  const version = await tileVersion();
+  const data = await apiGet<TileData>(`/tiles/${TILE_Z}/${wrapTileX(req.x, N_TILES)}/${req.y}?v=${version}&lod=${lod}`,
+    AbortSignal.any([signal, AbortSignal.timeout(TILE_REQUEST_TIMEOUT)]));
+  signal.throwIfAborted();
+  const localTile = { ...data, x: req.x };
+  raw.set(key, localTile);
+  if (raw.size > 80) raw.delete(raw.keys().next().value!);
+  return localTile;
 }
 
-const terr = new Map<string, Float32Array>();
-async function getTerrain(key: string, x: number, y: number): Promise<{ h: Float32Array; size: number }> {
-  let h = terr.get(key);
-  if (h === undefined) {
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const g = await apiGet<TerrainGrid>(`/terrain/${TILE_Z}/${x}/${y}`, AbortSignal.timeout(TILE_REQUEST_TIMEOUT));
-        h = new Float32Array(g.heights);
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (attempt === 0) await new Promise((r) => setTimeout(r, 350));
-      }
+async function getTerrain(req: BuildRequest, signal: AbortSignal) {
+  let h = terr.get(req.key);
+  if (!h) {
+    const grid = await apiGet<TerrainGrid>(`/terrain/${TILE_Z}/${wrapTileX(req.x, N_TILES)}/${req.y}`,
+      AbortSignal.any([signal, AbortSignal.timeout(TILE_REQUEST_TIMEOUT)]));
+    signal.throwIfAborted();
+    if (!Number.isInteger(grid.size) || grid.size < 2 ||
+        grid.heights.length !== grid.size ** 2 || !grid.heights.every(Number.isFinite)) {
+      throw new Error("invalid elevation grid");
     }
-    if (!h) throw lastErr ?? new Error("terrain unavailable");
-    terr.set(key, h);
-    if (terr.size > 80) terr.delete(terr.keys().next().value as string);
+    h = new Float32Array(grid.heights);
+    terr.set(req.key, h);
+    if (terr.size > 80) terr.delete(terr.keys().next().value!);
   }
-  return { h: h.slice(), size: Math.round(Math.sqrt(h.length)) };
+  return { h: h.slice(), size: Math.sqrt(h.length) };
 }
 
 // ---------- helpers ----------
@@ -477,7 +468,7 @@ function faceQuad(acc: Acc, at: Pt, nx: number, nz: number, halfW: number, y0: n
 }
 
 // ---------- main build ----------
-function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: number }): TileBuild {
+function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: number }, terrainOnly = false): TileBuild {
   const t0 = performance.now();
   // Tuile allégée : vue lointaine. Le backend n'a envoyé ni bâtiment, ni POI, ni nom de rue ;
   // ici on se contente d'un sol moins fin et on supprime arbres et cimetières.
@@ -510,7 +501,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
   // Road carriageways are rendered as crisp textured 3D ribbons above sidewalks (no sidewalk ever crosses a junction).
   H = (x: number, z: number) => sampleGrid(ter.h, ter.size, x / mpt + gx0 - t.x, z / mpt + gy0 - t.y);
   let groundImage: ImageBitmap | null = null;
-  if (typeof OffscreenCanvas !== "undefined") {
+  if (!terrainOnly && typeof OffscreenCanvas !== "undefined") {
     const paint = (R: number): OffscreenCanvas => {
     const k = R / ext, pxPerM = R / mpt;
     const cv = new OffscreenCanvas(R, R);
@@ -1191,16 +1182,40 @@ function transferables(b: TileBuild): Transferable[] {
   return out;
 }
 
-ctx.onmessage = async (e: MessageEvent<BuildRequest>) => {
+ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const req = e.data;
-  if (req.type !== "build") return;
+  if (req.type === "reset") {
+    destination.abort();
+    destination = new AbortController();
+    return;
+  }
+  const citySignal = destination.signal;
+  const task = new AbortController();
+  const signal = AbortSignal.any([citySignal, task.signal]);
   try {
-    const [data, ter] = await Promise.all([getTile(req.key, req.x, req.y, req.lod ?? "detail"), getTerrain(req.key, req.x, req.y)]);
-    const b = build(req, data, ter);
-    const reply: WorkerReply = { type: "built", build: b };
-    ctx.postMessage(reply, transferables(b));
+    let mapReady = false;
+    const map = getTile(req, signal).then((data) => {
+      mapReady = true;
+      return data;
+    });
+    const terrain = getTerrain(req, signal).then((grid) => {
+      if (req.preview && !mapReady && !signal.aborted) {
+        const empty: TileData = {
+          z: TILE_Z, x: req.x, y: req.y, extent: 4096,
+          buildings: [], roads: [], waterways: [], areas: [], names: [], pois: [], places: [],
+        };
+        const preview = build({ ...req, trees: false }, empty, { ...grid, h: grid.h.slice() }, true);
+        ctx.postMessage({ type: "preview", build: preview } satisfies WorkerReply, transferables(preview));
+      }
+      return grid;
+    });
+    const [data, grid] = await Promise.all([map, terrain]);
+    signal.throwIfAborted();
+    const result = build(req, data, grid);
+    ctx.postMessage({ type: "built", build: result } satisfies WorkerReply, transferables(result));
   } catch (err) {
-    const reply: WorkerReply = { type: "error", key: req.key, epoch: req.epoch, message: String(err) };
-    ctx.postMessage(reply);
+    task.abort();
+    if (citySignal.aborted) return;
+    ctx.postMessage({ type: "error", key: req.key, epoch: req.epoch, message: String(err) } satisfies WorkerReply);
   }
 };

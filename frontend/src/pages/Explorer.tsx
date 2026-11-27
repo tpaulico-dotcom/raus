@@ -21,11 +21,13 @@ export default function Explorer() {
   const mount = useRef<HTMLDivElement>(null);
   const engine = useRef<Engine | null>(null);
   const [origin, setOrigin] = useState<{ lat: number; lon: number; label: string } | null>(null);
+  const [destination, setDestination] = useState<{ lat: number; lon: number } | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [mode, setModeState] = useState<Mode>("walk");
   const [time, setTime] = useState<TimeOfDay>("live");
   const [help, setHelp] = useState(false);
   const [panneaux, setPanneaux] = useState({ position: false, anticipation: false });
+  const [satellite, setSatellite] = useState(false);
   const [plan, setPlan] = useState(true);
   const [locked, setLocked] = useState(false);
   const [travel, setTravel] = useState<{ phase: TeleportPhase; label: string } | null>(null);
@@ -66,9 +68,6 @@ export default function Explorer() {
           },
           onTeleport: (phase, label) => {
             setTravel(phase === "done" ? null : { phase, label });
-            if (phase !== "done") {
-              window.setTimeout(() => setTravel((t) => (t && t.phase === phase ? null : t)), 30000);
-            }
           },
           onError: (m) => toast.error(m),
           onLockChange: setLocked,
@@ -93,6 +92,7 @@ export default function Explorer() {
 
   const goTo = useCallback((lat: number, lon: number, label: string) => {
     setPlace(label);
+    setDestination({ lat, lon });
     if (!engine.current) {
       setOrigin({ lat, lon, label });
     } else {
@@ -105,22 +105,29 @@ export default function Explorer() {
     engine.current?.setMode(m);
     setModeState(m);
   };
+  const toggleSatellite = () => {
+    engine.current?.setSatellite(!satellite);
+    setSatellite(!satellite);
+  };
   const onTime = (t: TimeOfDay) => {
     engine.current?.setTimeOfDay(t);
     setTime(t);
   };
 
+  const preview = !!destination && (!hud || travel?.phase === "loading");
+  const mapPosition = preview && destination ? { ...destination, heading: 0 } : hud;
+
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#090D14] select-none" data-testid="france-3d-explorer-container">
       <div ref={mount} className="absolute inset-0" />
-      {plan && hud && (
+      {plan && mapPosition && (
         <div
           className={cn(
             "pointer-events-auto absolute bottom-4 left-4 z-20 size-[160px] overflow-hidden rounded-full border-2 shadow-2xl ring-1 transition-colors",
-            hud.isNight ? "border-cyan-400/40 bg-slate-950 ring-cyan-500/20" : "border-white/75 bg-slate-200 ring-black/20",
+            hud?.isNight ? "border-cyan-400/40 bg-slate-950 ring-cyan-500/20" : "border-white/75 bg-slate-200 ring-black/20",
           )}
         >
-          <Plan2D hud={{ lat: hud.lat, lon: hud.lon, heading: hud.heading }} large={mode === "fly"} night={hud.isNight} />
+          <Plan2D hud={mapPosition} large={preview || mode === "fly"} night={hud?.isNight} />
         </div>
       )}
       {hud && (
@@ -171,6 +178,11 @@ export default function Explorer() {
                 <img src="/raus-logo.svg" alt="RAUS" className="h-4 w-auto drop-shadow" />
                 <p className="truncate text-[11px] text-slate-300 drop-shadow" data-testid="hud-current-place">{place}</p>
               </div>
+              <button type="button" data-testid="satellite-toggle" aria-pressed={satellite} onClick={toggleSatellite}
+                className={cn("ml-auto rounded-lg px-3 py-1.5 text-xs ring-1 ring-white/30", satellite ? "bg-signal text-slate-950" : "bg-slate-950/85 text-slate-100")}>
+                Satellite
+              </button>
+
             </div>
             <SearchBar onGo={onSearch} />
           </div>
@@ -187,6 +199,12 @@ export default function Explorer() {
             <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">© OpenStreetMap</a>
             {" · relief Mapzen/AWS · météo "}
             <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-200 hover:underline">Open-Meteo.com</a>
+            {satellite && (
+              <a href="https://cloudless.eox.at/license-non-commercial" target="_blank" rel="noopener noreferrer"
+                className="mt-1 block rounded bg-slate-950/85 px-1.5 py-0.5 text-[10px] text-white hover:underline">
+                EOxCloudless cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 &amp; 2017) · CC BY 4.0
+              </a>
+            )}
           </p>
         </div>
         </header>
@@ -234,7 +252,7 @@ export default function Explorer() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.45 }}
-            className="pointer-events-none absolute inset-0 flex items-center justify-center bg-gradient-to-b from-sky-200/70 via-sky-100/60 to-slate-100/70 backdrop-blur-sm"
+            className="pointer-events-none absolute inset-0 flex items-center justify-center bg-gradient-to-b from-sky-200/70 via-sky-100/60 to-slate-100/70"
             data-testid="travel-overlay"
           >
             <div className="text-center">

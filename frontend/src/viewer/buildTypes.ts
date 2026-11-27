@@ -69,10 +69,14 @@ export interface BuildRequest {
   epoch: number;
   origin: { gx0: number; gy0: number; mpt: number };
   lod?: "detail" | "coarse";
+  preview?: boolean;
   /** false = pas d'arbres (survol) : ils ne se voient pas d'en haut et coûtent cher. */
   trees?: boolean;
 }
 
+export type WorkerRequest = BuildRequest | { type: "reset" };
+
 export type WorkerReply =
+  | { type: "preview"; build: TileBuild }
   | { type: "built"; build: TileBuild }
   | { type: "error"; key: string; epoch: number; message: string };

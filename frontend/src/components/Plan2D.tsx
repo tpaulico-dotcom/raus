@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { lonLatToGlobal, N_TILES, wrapTileX } from "@/viewer/geo";
 
 /** Mini-plan GPS circulaire (160×160), orienté selon le cap, boussole N, thème auto jour/nuit.
  *  - Mode piéton : routes/rues/chemins/rivières + noms des rues principales.
@@ -28,9 +29,9 @@ const ROAD_RANK: Record<string, number> = {
 
 function tuileDe(lat: number, lon: number, z: number) {
   const n = Math.pow(2, z);
-  const fx = ((lon + 180) / 360) * n;
-  const rad = (lat * Math.PI) / 180;
-  const fy = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n;
+  const { gx, gy } = lonLatToGlobal(lat, lon);
+  const fx = gx * n / N_TILES;
+  const fy = gy * n / N_TILES;
   return { x: Math.floor(fx), y: Math.floor(fy), dx: (fx % 1) * EXTENT, dy: (fy % 1) * EXTENT };
 }
 
@@ -40,8 +41,14 @@ export default function Plan2D({ hud, large = false, night = false }: { hud: Hud
   const [zoom, setZoom] = useState(large ? 0.008 : 0.65);
   const walkTiles = useRef(new Map<string, Tuile>());
   const flyTiles = useRef(new Map<string, Tuile>());
-  const enCours = useRef(new Set<string>());
   const [, forcer] = useState(0);
+  const [connection, setConnection] = useState(0);
+
+  useEffect(() => {
+    const reconnect = () => setConnection((value) => value + 1);
+    window.addEventListener("online", reconnect);
+    return () => window.removeEventListener("online", reconnect);
+  }, []);
 
   const z = large ? Z_FLY : Z_WALK;
   const cur = hud ? tuileDe(hud.lat, hud.lon, z) : null;
@@ -50,28 +57,39 @@ export default function Plan2D({ hud, large = false, night = false }: { hud: Hud
 
   useEffect(() => {
     if (txCur === null || tyCur === null) return;
-    let annule = false;
+    const request = new AbortController();
     const store = large ? flyTiles.current : walkTiles.current;
     const endpoint = large ? "/api/overview" : "/api/tiles";
     (async () => {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const k = `${z}/${txCur + dx}/${tyCur + dy}`;
-          if (store.has(k) || enCours.current.has(k)) continue;
-          enCours.current.add(k);
+      const offsets = [0, -1, 1];
+      for (const dy of offsets) {
+        for (const dx of offsets) {
+          if (request.signal.aborted) return;
+          const n = 2 ** z;
+          const x = wrapTileX(txCur + dx, n), y = tyCur + dy;
+          if (y < 0 || y >= n) continue;
+          const k = `${z}/${x}/${y}`;
+          if (store.has(k)) continue;
           try {
-            const r = await fetch(`${endpoint}/${k}`, { cache: "no-store" });
+            const r = await fetch(`${endpoint}/${k}`, {
+              cache: "no-store",
+              signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
+            });
             if (!r.ok) continue;
             const t = (await r.json()) as Tuile;
+            if (request.signal.aborted) return;
             store.set(k, t);
-            if (!annule) forcer((n) => n + 1);
-          } catch { /* ignore */ }
-          finally { enCours.current.delete(k); }
+            if (store.size > 80) {
+              const oldest = store.keys().next().value;
+              if (oldest !== undefined) store.delete(oldest);
+            }
+            forcer((n) => n + 1);
+          } catch { /* La carte conserve les tuiles déjà chargées. */ }
         }
       }
     })();
-    return () => { annule = true; };
-  }, [txCur, tyCur, large, z]);
+    return () => request.abort();
+  }, [txCur, tyCur, large, z, connection]);
 
   useEffect(() => {
     const cv = ref.current;
@@ -107,8 +125,9 @@ export default function Plan2D({ hud, large = false, night = false }: { hud: Hud
     const p = tuileDe(hud.lat, hud.lon, z);
     const mPerUnit = large ? M_PER_UNIT_FLY : M_PER_UNIT_WALK;
     const px = zoom * mPerUnit; // pixels par unité de tuile
+    const width = 2 ** z;
     const versEcran = (tx: number, ty: number, ux: number, uy: number): [number, number] => [
-      cx + ((tx - p.x) * EXTENT + ux - p.dx) * px,
+      cx + ((wrapTileX(tx - p.x + width / 2, width) - width / 2) * EXTENT + ux - p.dx) * px,
       cy + ((ty - p.y) * EXTENT + uy - p.dy) * px,
     ];
 

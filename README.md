@@ -43,6 +43,19 @@ il ne survit pas aux réveils, donc la première tuile d'une zone est plus lente
 | Géocodage | OSM Nominatim (+ BAN France) | Aucune |
 | Empreintes bâtiments de secours | Microsoft GlobalMLBuildingFootprints (ODbL) | Aucune |
 
+## Vue satellite sans clé
+
+Le bouton **Satellite** ajoute à la scène 3D la mosaïque Sentinel-2 cloudless 2016 d’EOX,
+sous [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Le fond est chargé depuis le
+[service WMTS public d’EOX](https://cloudless.eox.at/documentation/usage). Le relief et les bâtiments
+restent ceux du moteur RAUS. Si une image est indisponible, le sol vectoriel reste affiché.
+Les images sont combinées avec la texture RAUS pour garder visibles les tracés cartographiques.
+Le serveur réutilise les tuiles depuis le cache SQLite pendant sept jours et mutualise les téléchargements
+simultanés d’une même tuile. Le cache est local à chaque instance du serveur.
+
+Crédit satellite : EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH
+(Contains modified Copernicus Sentinel data 2016 & 2017).
+
 ## Architecture
 
 - **Backend (`backend/`)** : FastAPI + cache SQLite local (`data/cache.sqlite3`) qui réduit chaque tuile vectorielle `z=14` en JSON compact et décode le relief Terrarium.

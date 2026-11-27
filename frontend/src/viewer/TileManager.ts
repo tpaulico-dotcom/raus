@@ -2,10 +2,10 @@
 // the 3x3 block around the player is always kept warm, and the tiles along the
 // velocity vector (a few seconds ahead) are fetched and built before arrival.
 import * as THREE from "three";
-import type { MeshArrays, TileBuild, WorkerReply, WorldPlace, WorldPoi } from "./buildTypes";
+import type { MeshArrays, TileBuild, WorkerReply, WorkerRequest, WorldPlace, WorldPoi } from "./buildTypes";
 import { ROAD_MATS } from "./buildTypes";
 import type { Origin } from "./geo";
-import { tileKey, worldToGlobal } from "./geo";
+import { N_TILES, TILE_Z, tileKey, worldToGlobal, wrapTileX } from "./geo";
 import { createGroundFacade, type Materials } from "./materials";
 import { sampleGrid } from "./terrain";
 
@@ -55,6 +55,8 @@ interface Entry {
   group?: THREE.Group;
   build?: TileBuild;
   minH?: number;
+  imagery?: { material: THREE.MeshStandardMaterial; base: THREE.Texture | null; texture: THREE.CanvasTexture };
+  imageryRetryAt?: number;
   bounds?: { minx: number; minz: number; maxx: number; maxz: number };
 }
 
@@ -102,6 +104,8 @@ export class TileManager {
   private waiters = new Map<string, Array<() => void>>();
   private aniso = 8;
   private hideTrees = false;
+  private satellite = false;
+  private imageryRequests = new Map<Entry, AbortController>();
   private groundMats = new Map<string, THREE.MeshStandardMaterial>();
   private monumentPool = new THREE.MeshBasicMaterial({ map: makeLampPoolTex(), color: "#ffd896", transparent: true, opacity: 0, visible: false, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
   onError?: (msg: string) => void;
@@ -127,6 +131,66 @@ export class TileManager {
     );
     this.groundMats.set(key, m);
     return m;
+  }
+
+  setSatellite(enabled: boolean) {
+    this.satellite = enabled;
+    for (const entry of this.tiles.values()) {
+      entry.imageryRetryAt = undefined;
+      if (!enabled) this.clearImagery(entry);
+    }
+  }
+
+  private clearImagery(entry: Entry) {
+    this.imageryRequests.get(entry)?.abort();
+    this.imageryRequests.delete(entry);
+    if (!entry.imagery) return;
+    const { material, base, texture } = entry.imagery;
+    material.map = base;
+    material.needsUpdate = true;
+    texture.dispose();
+    entry.imagery = undefined;
+  }
+
+  private async loadImagery(entry: Entry, mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>) {
+    const request = new AbortController();
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(16_000)]);
+    this.imageryRequests.set(entry, request);
+    try {
+      const x = wrapTileX(entry.x, N_TILES);
+      const response = await fetch(
+        `/api/satellite/${TILE_Z}/${x}/${entry.y}`,
+        { signal },
+      );
+      if (!response.ok) throw new Error("satellite tile unavailable");
+      const image = await createImageBitmap(await response.blob());
+      try {
+        request.signal.throwIfAborted();
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 512;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("satellite canvas unavailable");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const base = mesh.material.map;
+        if (base?.image) {
+          context.globalAlpha = 0.26;
+          context.drawImage(base.image, 0, 0, canvas.width, canvas.height);
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.flipY = false;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = this.aniso;
+        mesh.material.map = texture;
+        mesh.material.needsUpdate = true;
+        entry.imagery = { material: mesh.material, base, texture };
+      } finally {
+        image.close();
+      }
+    } catch {
+      if (!request.signal.aborted) entry.imageryRetryAt = performance.now() + 30_000;
+    } finally {
+      if (this.imageryRequests.get(entry) === request) this.imageryRequests.delete(entry);
+    }
   }
 
   /** Intensité de l'éclairage nocturne des bâtiments publics (0 = jour, 1 = nuit pleine). */
@@ -182,6 +246,7 @@ export class TileManager {
     this.monumentPool.map?.dispose();
     this.monumentPool.dispose();
     this.worker.terminate();
+    for (const key of this.waiters.keys()) this.release(key);
     for (const e of this.tiles.values()) this.unload(e);
     this.tiles.clear();
   }
@@ -191,6 +256,8 @@ export class TileManager {
     this.tiles.clear();
     this.inflight = 0;
     this.epoch++;
+    this.worker.postMessage({ type: "reset" } satisfies WorkerRequest);
+    for (const key of this.waiters.keys()) this.release(key);
     this.origin = origin;
   }
 
@@ -219,6 +286,7 @@ export class TileManager {
     const capSur = Number.isFinite(yaw) ? yaw : 0;
     const fx = -Math.sin(capSur), fz = -Math.cos(capSur);
     const consider = (x: number, y: number, anticipated: boolean, bias: number) => {
+      if (y < 0 || y >= N_TILES) return;
       const k = tileKey(x, y);
       const g = worldToGlobal(this.origin, pos.x, pos.z);
       const dx = (x + 0.5 - g.gx) * mpt;
@@ -230,7 +298,7 @@ export class TileManager {
         const maxRing = along > 0.25 ? radius : along > -0.25 ? 2 : 1;
         if (ring > maxRing) return;
       }
-      const pr = dist - along * mpt * 2.0 + bias;
+      const pr = ring === 0 ? -Infinity : dist - along * mpt * 2.0 + bias;
       // Au-delà de 3 km à la ronde : tuile allégée, plus 1 km de détail supplémentaire droit
       // devant (le regard porte loin). Les bâtiments restent dans les deux cas ; on retire le
       // travail fin (murs < 40 m², églises, sol 2048, arbres, cimetières, panneaux), invisible
@@ -306,7 +374,17 @@ export class TileManager {
       const e = queue.shift()!;
       e.status = "loading";
       this.inflight++;
-      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt }, lod: e.lod, trees: e.trees });
+      this.worker.postMessage({ type: "build", key: e.key, x: e.x, y: e.y, epoch: this.epoch, origin: { gx0: this.origin.gx0, gy0: this.origin.gy0, mpt }, lod: e.lod, trees: e.trees, preview: e.x === tx && e.y === ty && !e.build } satisfies WorkerRequest);
+    }
+    if (!this.satellite) return;
+    const nearest = [...want.keys()]
+      .map((key) => this.tiles.get(key)!)
+      .sort((a, b) => a.priority - b.priority);
+    for (const entry of nearest) {
+      if (this.imageryRequests.size >= 4) break;
+      if (entry.imagery || this.imageryRequests.has(entry) || (entry.imageryRetryAt ?? 0) > now) continue;
+      const mesh = entry.group?.getObjectByName("terrain") as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+      if (mesh) void this.loadImagery(entry, mesh);
     }
   }
 
@@ -315,23 +393,40 @@ export class TileManager {
     if (e && (e.status === "ready" || e.status === "error")) return Promise.resolve();
     return new Promise((resolve) => {
       const list = this.waiters.get(key) ?? [];
-      list.push(resolve);
+      const done = () => {
+        clearTimeout(timer);
+        const index = list.indexOf(done);
+        if (index !== -1) list.splice(index, 1);
+        if (!list.length) this.waiters.delete(key);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      list.push(done);
       this.waiters.set(key, list);
-      setTimeout(resolve, timeoutMs);
     });
   }
 
   private release(key: string) {
-    this.waiters.get(key)?.forEach((r) => r());
+    this.waiters.get(key)?.slice().forEach((r) => r());
     this.waiters.delete(key);
   }
 
   private onReply(msg: WorkerReply) {
-    const epoch = msg.type === "built" ? msg.build.epoch : msg.epoch;
-    if (epoch !== this.epoch) return;
-    this.inflight = Math.max(0, this.inflight - 1);
-    const key = msg.type === "built" ? msg.build.key : msg.key;
+    const epoch = msg.type === "error" ? msg.epoch : msg.build.epoch;
+    if (epoch !== this.epoch) {
+      if (msg.type !== "error") {
+        msg.build.groundImage?.close();
+        msg.build.stationAtlas?.close();
+      }
+      return;
+    }
+    const key = msg.type === "error" ? msg.key : msg.build.key;
     const e = this.tiles.get(key);
+    if (msg.type === "preview") {
+      if (e && !e.group) this.attach(e, msg.build);
+      return;
+    }
+    this.inflight = Math.max(0, this.inflight - 1);
     if (!e) return;
     if (msg.type === "error") {
       e.status = "error";
@@ -344,6 +439,7 @@ export class TileManager {
     this.unload(e); // background restyle: swap the old meshes for the new ones
     this.attach(e, msg.build);
     e.status = "ready";
+    e.retries = 0;
     this.release(key);
   }
 
@@ -510,6 +606,7 @@ export class TileManager {
   }
 
   private unload(e: Entry) {
+    this.clearImagery(e);
     if (!e.group) return;
     this.scene.remove(e.group);
     e.group.traverse((o) => {

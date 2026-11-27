@@ -105,6 +105,7 @@ export class Engine {
   private quality = 0; // 0 = best … 4 = lightest (adaptive)
   private goodSeconds = 0;
   private busy = false;
+  private navigation = 0;
   private anim: { from: number; to: number; t0: number; dur: number; resolve: () => void } | null = null;
   private drag: { x: number; y: number; moved: number } | null = null;
   private disposed = false;
@@ -197,6 +198,9 @@ export class Engine {
   // ---------- public API ----------
   dispose() {
     this.disposed = true;
+    this.navigation++;
+    this.anim?.resolve();
+    this.anim = null;
     cancelAnimationFrame(this.raf);
     this.cleanup.forEach((f) => f());
     this.moveListeners.clear();
@@ -296,6 +300,10 @@ export class Engine {
       }
     }
     return null;
+  }
+
+  setSatellite(enabled: boolean) {
+    this.tiles.setSatellite(enabled);
   }
 
   setMode(mode: Mode) {
@@ -423,14 +431,20 @@ export class Engine {
 
   /** Fly to any French location. The view lifts off, the new area streams in, then you land on the nearest street. */
   async teleport(lat: number, lon: number, label: string, instant = false) {
-    if (this.busy) return;
+    if (this.disposed) return;
+    const navigation = ++this.navigation;
+    const skipTakeoff = instant || this.busy;
+    const previousAnimation = this.anim;
+    this.anim = null;
+    previousAnimation?.resolve();
     this.busy = true;
     const p = this.camera.position;
     try {
-      if (!instant) {
+      if (!skipTakeoff) {
         this.cb.onTeleport("leaving", label);
         await this.tweenY(this.agl + 70, 700);
       }
+      if (navigation !== this.navigation) return;
       this.cb.onTeleport("loading", label);
       this.tiles.reset(makeOrigin(lat, lon));
       this.overlays.sync();
@@ -440,19 +454,9 @@ export class Engine {
       this.agl = this.mode === "fly" ? 60 : 40;
       this.tiles.update(p, this.vel, EYE, this.yaw, false);
       const { tx, ty } = this.tiles.tileAt(0, 0);
-      // On attend la destination ET la couronne autour (3x3) : on n'arrive jamais dans un monde
-      // vide, et rien ne vient se charger sous les pieds du spectateur. Le bouton reste en
-      // « chargement » pendant ce temps.
-      const attente: Promise<void>[] = [];
-      for (let ax = -1; ax <= 1; ax++) {
-        for (let ay = -1; ay <= 1; ay++) {
-          attente.push(this.tiles.waitReady(tileKey(tx + ax, ty + ay), 26000));
-        }
-      }
-      await Promise.race([
-        Promise.all(attente).then(() => undefined),
-        new Promise<void>((r) => setTimeout(r, 28000)),
-      ]);
+      // Les tuiles voisines continuent de se charger pendant la descente.
+      await this.tiles.waitReady(tileKey(tx, ty), 18_000);
+      if (navigation !== this.navigation) return;
       const target = lonLatToWorld(this.tiles.origin, lat, lon);
       const inside = this.tiles.buildingAt(target.x, target.z);
       const spot = inside
@@ -470,9 +474,11 @@ export class Engine {
       this.targetY = finalY;
       await this.tweenY(finalY, instant ? 1600 : 1300);
     } finally {
-      this.busy = false;
-      this.cb.onTeleport("done", label);
-      this.publish(true);
+      if (navigation === this.navigation) {
+        this.busy = false;
+        this.cb.onTeleport("done", label);
+        this.publish(true);
+      }
     }
   }
 

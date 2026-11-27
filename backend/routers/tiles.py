@@ -20,11 +20,14 @@ TILE_ZOOM = 14
 CACHE_VERSION = 17
 TILE_TTL = 30 * 24 * 3600
 TERRAIN_TTL = 30 * 24 * 3600
+SATELLITE_TTL = 7 * 24 * 3600
 TERRAIN_SIZE = 129
 HEADERS = {"User-Agent": "RAUS/1.0 (open-source 3D world engine)"}
 
 _inflight: dict[str, asyncio.Future] = {}
 _geo_cache: dict[str, list[dict]] = {}
+_satellite_inflight: dict[str, asyncio.Task[bytes]] = {}
+_satellite_slots = asyncio.Semaphore(4)
 
 
 def _encode(z: int, x: int, y: int, raw: dict | None, emp: list[dict] | None = None, coarse: bool = False) -> bytes:
@@ -101,6 +104,43 @@ async def get_tile(z: int, x: int, y: int, lod: str = Query("detail", pattern="^
         return _json(await asyncio.shield(fut))
     except Exception:
         raise HTTPException(status_code=502, detail="map data source unavailable, retry shortly")
+
+
+async def _load_satellite(z: int, x: int, y: int, key: str) -> bytes:
+    try:
+        url = f"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg"
+        async with _satellite_slots, httpx.AsyncClient() as client:
+            r = await client.get(url, headers=HEADERS, timeout=12)
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="satellite tile unavailable")
+        r.raise_for_status()
+        if not r.headers.get("content-type", "").startswith("image/jpeg") or not r.content.startswith(b"\xff\xd8"):
+            raise ValueError("unexpected satellite tile format")
+        cache.put("satellite", key, r.content, ttl=SATELLITE_TTL)
+        return r.content
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("satellite %s/%s/%s: %s", z, x, y, exc)
+        raise HTTPException(status_code=502, detail="satellite service unavailable") from exc
+    finally:
+        _satellite_inflight.pop(key, None)
+
+
+@router.get("/satellite/{z}/{x}/{y}")
+async def get_satellite(z: int, x: int, y: int):
+    """Serve one public EOX Sentinel-2 cloudless 2016 JPEG to the viewer."""
+    if z != TILE_ZOOM or not (0 <= x < 2 ** z and 0 <= y < 2 ** z):
+        raise HTTPException(status_code=404, detail="satellite tile out of range")
+    key = f"eox2016/{z}/{x}/{y}"
+    data = cache.get("satellite", key)
+    if data is None:
+        task = _satellite_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(_load_satellite(z, x, y, key))
+            _satellite_inflight[key] = task
+            # Le téléchargement peut finir après la fermeture de toutes les vues qui l'attendent.
+            task.add_done_callback(lambda finished: None if finished.cancelled() else finished.exception())
+        data = await asyncio.shield(task)
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 async def _ban_api(client: httpx.AsyncClient, q: str) -> list[dict]:
