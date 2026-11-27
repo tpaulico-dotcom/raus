@@ -17,6 +17,8 @@ type Tuile = {
   waterways?: { kind?: string; pts?: number[] }[];
   names?: { kind?: string; name?: string | null; pts: number[] }[];
   places?: { name: string; kind: string; x: number; y: number; rank?: number }[];
+  /** Zones (mer, grands lacs) : anneaux en unités de tuile, à remplir en bleu. */
+  areas?: { kind?: string; rings: number[][] }[];
 };
 
 const ROAD_RANK: Record<string, number> = {
@@ -125,6 +127,24 @@ export default function Plan2D({ hud, large = false, night = false }: { hud: Hud
     g.translate(-cx, -cy);
     g.lineCap = "round";
     g.lineJoin = "round";
+
+    // Mer et grands plans d'eau : remplis sous les routes. Sans ça, en survol on ne sait pas
+    // de quel côté est la côte. Seules les zones d'eau sont dessinées (aucun bâtiment, aucun POI).
+    g.fillStyle = waterCol;
+    for (const t of store.values()) {
+      for (const a of t.areas ?? []) {
+        if (a.kind !== "water") continue;
+        g.beginPath();
+        for (const r of a.rings) {
+          for (let i = 0; i < r.length; i += 2) {
+            const [X, Y] = versEcran(t.x, t.y, r[i], r[i + 1]);
+            if (i === 0) g.moveTo(X, Y); else g.lineTo(X, Y);
+          }
+          g.closePath();
+        }
+        g.fill("evenodd");
+      }
+    }
 
     const trace = (tx: number, ty: number, pts: number[]) => {
       if (pts.length < 4) return;

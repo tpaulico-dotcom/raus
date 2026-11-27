@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from PIL import Image
 
 from lib import cache, empreintes
-from lib.vector_tiles import EXTENT, PLACE_CLASSES, _flat, _lines, _safe_shape, fetch_raw_tile, reduce_tile
+from lib.vector_tiles import EXTENT, PLACE_CLASSES, _flat, _lines, _polys, _safe_shape, fetch_raw_tile, reduce_tile
 from models.tiles import GeoResult, TerrainGrid, TileData
 
 logger = logging.getLogger(__name__)
@@ -223,9 +223,29 @@ OVERVIEW_ROADS = {"motorway", "trunk", "primary", "secondary"}
 
 
 def _reduce_overview(z: int, x: int, y: int, raw: dict | None) -> dict:
-    out: dict = {"z": z, "x": x, "y": y, "extent": EXTENT, "places": [], "roads": []}
+    out: dict = {"z": z, "x": x, "y": y, "extent": EXTENT, "places": [], "roads": [], "areas": []}
     if not raw:
         return out
+    # Eau : la mini-map ronde doit montrer la mer et les grands lacs, sinon en survol on ne
+    # sait pas de quel côté est la côte. Polygones seuls, décimés — un trait de côte à 55 km
+    # n'a pas besoin de 5 000 points.
+    for f in raw.get("water", {}).get("features", []):
+        g = f.get("geometry", {})
+        if g.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        s = _safe_shape(g)
+        if s is None:
+            continue
+        for poly in _polys(s):
+            if poly.area < 300:
+                continue
+            rings = []
+            for ring in [poly.exterior, *poly.interiors]:
+                coords = list(ring.coords)
+                step = max(1, len(coords) // 240)
+                rings.append(_flat(coords[::step]))
+            if rings and len(rings[0]) >= 6:
+                out["areas"].append({"kind": "water", "rings": rings})
     for f in raw.get("place", {}).get("features", []):
         p = f.get("properties", {})
         g = f.get("geometry", {})
