@@ -25,6 +25,14 @@ Moteur 3D temps réel du monde entier en **Three.js + FastAPI**, ultra-léger, *
 
 ![Lisbonne à pied](docs/screenshots/04-lisbonne.webp)
 
+## Déploiement
+
+L'application tourne en ligne sur **<https://roadwalk-3d.vercel.app>** (Vercel, offre gratuite).
+Le dépôt est relié au projet : **chaque `git push` sur `main` redéploie automatiquement**.
+`vercel.json` décrit les deux services — le front statique `frontend/` et le backend FastAPI
+`backend/` — et route `/api/*` vers le backend. Le cache SQLite vit dans `/tmp` : en serverless
+il ne survit pas aux réveils, donc la première tuile d'une zone est plus lente.
+
 ## Sources de données (100 % gratuites & monde entier)
 
 | Couche | Source | Clé API |
