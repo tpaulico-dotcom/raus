@@ -281,7 +281,8 @@ async def get_overview(z: int, x: int, y: int):
     n = 2 ** z
     if not (0 <= x < n and 0 <= y < n):
         raise HTTPException(status_code=404, detail="tile out of range")
-    key = f"ov1/{z}/{x}/{y}"
+    # ov2 : ajout des polygones d'eau à la tuile régionale — l'ancien cache ov1 n'en a pas.
+    key = f"ov2/{z}/{x}/{y}"
     cached = cache.get_json("overview", key)
     if cached:
         return cached
