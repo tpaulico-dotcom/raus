@@ -664,12 +664,15 @@ export class Engine {
     this.sun.intensity = this.baseSunI + this.weatherFx.flashBoost;
     const fog = this.scene.fog as THREE.Fog;
     const ff = this.fogFactor;
+    // Brume de distance : le lointain se dissout dans la couleur du ciel, on ne devine plus le
+    // bord des zones chargées ni ce qu'il y a derrière. Avant, la brume commençait à 5,5 km et
+    // laissait la silhouette nette jusqu'à 9,5 km — d'où l'impression de plaque au loin.
     if (this.mode === "fly" || this.agl > 35) {
-      fog.far = THREE.MathUtils.clamp(5500 + this.agl * 12, 5500, 9500) * ff;
-      fog.near = Math.min(1200 + this.agl * 4, 3000) * ff;
+      fog.far = THREE.MathUtils.clamp(2600 + this.agl * 6, 2600, 6200) * ff;
+      fog.near = Math.min(520 + this.agl * 2.2, 1500) * ff;
     } else {
-      fog.far = THREE.MathUtils.clamp(1700 + this.agl * 7, 1700, 3800) * ff;
-      fog.near = Math.min(220 + this.agl * 2, 900) * ff;
+      fog.far = THREE.MathUtils.clamp(1600 + this.agl * 7, 1600, 3400) * ff;
+      fog.near = Math.min(200 + this.agl * 2, 850) * ff;
     }
 
     const now = performance.now();
