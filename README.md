@@ -1,6 +1,8 @@
 # RAUS — Réseau Actif d'Utilité Sociale
 
-**RAUS** · **[www.lechasseur.art](https://www.lechasseur.art)**
+**RAUS** · **[www.lechasseur.art](https://www.lechasseur.art)** · **[Démo en ligne](https://roadwalk-3d.vercel.app)**
+
+> ▶ **Essayer maintenant : <https://roadwalk-3d.vercel.app>** — aucune installation, aucune clé.
 
 Moteur 3D temps réel du monde entier en **Three.js + FastAPI**, ultra-léger, **100 % gratuit** et sans aucune clé API payante. Conçu comme socle réutilisable pour GPS 3D, jeux, géocaching, pèlerinages et trails.
 
