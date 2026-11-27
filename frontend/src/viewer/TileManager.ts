@@ -59,6 +59,27 @@ interface Entry {
 }
 
 const coniferGeo = new THREE.ConeGeometry(1, 2.6, 7).translate(0, 1.3, 0);
+
+/** Nappe d'eau : polygone plat en XZ. Les grands anneaux sont décimés — earcut sur 5 000
+ *  points coûterait cher pour un trait de côte qui ne se voit pas à cette échelle. */
+function seaGeometry(rings: number[][]): THREE.BufferGeometry | null {
+  const toVec = (flat: number[]) => {
+    const step = Math.max(1, Math.ceil(flat.length / 2 / 400));
+    const v: THREE.Vector2[] = [];
+    for (let i = 0; i < flat.length; i += 2 * step) v.push(new THREE.Vector2(flat[i], -flat[i + 1]));
+    return v;
+  };
+  const outer = rings[0] ? toVec(rings[0]) : [];
+  if (outer.length < 3) return null;
+  const shape = new THREE.Shape(outer);
+  for (let i = 1; i < rings.length; i++) {
+    const hole = toVec(rings[i]);
+    if (hole.length >= 3) shape.holes.push(new THREE.Path(hole));
+  }
+  const geo = new THREE.ShapeGeometry(shape);
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
 const trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 1, 5).translate(0, 0.5, 0);
 const poolGeo = new THREE.PlaneGeometry(13, 13);
 poolGeo.rotateX(-Math.PI / 2);
@@ -102,6 +123,8 @@ export class TileManager {
   private waiters = new Map<string, Array<() => void>>();
   private aniso = 8;
   private hideTrees = false;
+  // Une seule matière pour toutes les nappes d'eau : un draw call par tuile, pas par plan d'eau.
+  private seaMat = new THREE.MeshStandardMaterial({ color: "#2f6f9c", roughness: 0.42, metalness: 0.05 });
   private groundMats = new Map<string, THREE.MeshStandardMaterial>();
   private monumentPool = new THREE.MeshBasicMaterial({ map: makeLampPoolTex(), color: "#ffd896", transparent: true, opacity: 0, visible: false, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
   onError?: (msg: string) => void;
@@ -380,6 +403,19 @@ export class TileManager {
       tm.userData.own = true;
       tm.matrixAutoUpdate = false;
       g.add(tm);
+      // Mer : nappe bleue franche au-dessus du sol peint. Les îles restent dessinées par leur
+      // propre relief, qui dépasse de la nappe.
+      for (const s of b.seas) {
+        const sgeo = seaGeometry(s.rings);
+        if (!sgeo) continue;
+        const sm = new THREE.Mesh(sgeo, this.seaMat);
+        sm.position.y = s.y;
+        sm.receiveShadow = true;
+        sm.matrixAutoUpdate = false;
+        sm.updateMatrix();
+        sm.userData.own = true;
+        g.add(sm);
+      }
     }
     for (const m of ROAD_MATS) add(b.roads[m], this.mats.roads[m], false);
     add(b.walls, this.mats.walls, true);

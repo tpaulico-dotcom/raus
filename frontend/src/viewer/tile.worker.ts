@@ -773,6 +773,24 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
     }
   }
 
+  // Mer : grande étendue d'eau (mer, lac, estuaire) rendue comme une nappe à plat. Le sol est
+  // peint en 512 px dans les tuiles lointaines : la mer y devient floue et se confond avec la
+  // terre. Une nappe franche la rend reconnaissable tout de suite ; les îles, elles, restent
+  // dessinées par le relief de leur tuile, au-dessus de l'eau.
+  const seas: { rings: number[][]; y: number }[] = [];
+  for (const a of t.areas) {
+    if (a.kind !== "water") continue;
+    const outer = ring(a.rings[0]);
+    if (outer.length < 3 || Math.abs(signedArea(outer)) < 500_000) continue;
+    let low = Infinity;
+    for (const p of outer) low = Math.min(low, H(p[0], p[1]));
+    if (!Number.isFinite(low)) continue;
+    // La mer est plate partout : niveau 0 imposé, sinon deux tuiles voisines posent leur nappe
+    // à des hauteurs différentes et on voit une marche au bord. Les lacs d'altitude, eux,
+    // suivent le terrain.
+    seas.push({ rings: a.rings, y: low < 5 ? 0.35 : low + 0.35 });
+  }
+
   // 3D road carriageways (nettes à pied), vrais ponts et portails de tunnels.
   const decks: { pts: number[]; y: number; hw: number; base: number }[] = [];
   const mouths: { p: Pt; dir: Pt; w: number }[] = [];
@@ -1164,6 +1182,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
     roofs: roofs.out(),
     roads: Object.fromEntries(ROAD_MATS.map((m) => [m, roads[m].out()])) as Record<RoadMat, MeshArrays>,
     decks,
+    seas,
     trees: new Float32Array(trees),
     fpCoords: new Float32Array(fpCoords),
     fpStarts: new Int32Array(fpStarts),

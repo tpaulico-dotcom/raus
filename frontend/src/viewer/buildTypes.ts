@@ -58,6 +58,8 @@ export interface TileBuild {
   places: WorldPlace[];
   /** Tabliers de pont, en mètres locaux : la marche les suit au lieu de passer dessous. */
   decks: { pts: number[]; y: number; hw: number; base: number }[];
+  /** Nappes d'eau (mer, grands lacs) : polygones plats à dessiner en bleu franc. */
+  seas: { rings: number[][]; y: number }[];
   stats: { buildings: number; roads: number; buildMs: number };
 }
 
