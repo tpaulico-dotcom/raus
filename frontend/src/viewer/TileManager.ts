@@ -102,7 +102,6 @@ export class TileManager {
   private inflight = 0;
   private waiters = new Map<string, Array<() => void>>();
   private aniso = 8;
-  private coarse = false;
   private groundMats = new Map<string, THREE.MeshStandardMaterial>();
   private monumentPool = new THREE.MeshBasicMaterial({ map: makeLampPoolTex(), color: "#ffd896", transparent: true, opacity: 0, visible: false, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
   onError?: (msg: string) => void;
@@ -211,11 +210,6 @@ export class TileManager {
     // Le rayon de préchargement suit l'altitude : à 45 m en survol on ne voit pas à 6 km, et
     // charger 40 tuiles détaillées pour rien bloquait l'arrivée sur une grande ville.
     const radius = !isFly ? 1 : altitude > 400 ? 4 : altitude > 150 ? 2 : 1;
-    // Niveau de détail : au-dessus de 250 m, les tuiles passent en allégé (terrain, eau, grands
-    // axes, noms de villes — sans bâtiments). Hystérésis à 200 m en descente : sans elle, une
-    // altitude qui oscille autour du seuil relancerait les mêmes tuiles sans arrêt.
-    if (altitude > 250) this.coarse = true;
-    else if (altitude < 200) this.coarse = false;
     const want = new Map<string, { x: number; y: number; pr: number; ant: boolean; lod: "detail" | "coarse" }>();
     const mpt = this.origin.mpt;
     const capSur = Number.isFinite(yaw) ? yaw : 0;
@@ -233,7 +227,12 @@ export class TileManager {
         if (ring > maxRing) return;
       }
       const pr = dist - along * mpt * 2.0 + bias;
-      const lod: "detail" | "coarse" = this.coarse ? "coarse" : "detail";
+      // Au-delà de 3 km à la ronde : tuile allégée, plus 1 km de détail supplémentaire droit
+      // devant (le regard porte loin). Les bâtiments restent dans les deux cas ; on retire le
+      // travail fin (murs < 40 m², églises, sol 2048, arbres, cimetières, panneaux), invisible
+      // à cette distance mais qui coûtait 3,5 s et 870 Ko par tuile.
+      const lim = 3000 + 1000 * Math.max(0, along);
+      const lod: "detail" | "coarse" = dist > lim ? "coarse" : "detail";
       const prev = want.get(k);
       if (!prev || pr < prev.pr) want.set(k, { x, y, pr, ant: anticipated && !(prev && !prev.ant), lod });
     };

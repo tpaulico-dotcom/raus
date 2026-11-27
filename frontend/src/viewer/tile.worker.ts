@@ -954,7 +954,7 @@ function build(req: BuildRequest, t: TileData, ter: { h: Float32Array; size: num
 
     const city = rel > 15;
     const facade = (city ? CITY_FACADES : FACADES)[Math.floor(seed * (city ? CITY_FACADES.length : FACADES.length))];
-    const hasGround = rel >= 5 && b.mh < 0.5;
+    const hasGround = !coarse && rel >= 5 && b.mh < 0.5;
     const split = gMin + 3.6;
     if (hasGround) {
       const ga = groundAcc(city ? "shop" : "d");

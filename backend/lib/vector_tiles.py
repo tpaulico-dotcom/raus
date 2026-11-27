@@ -169,36 +169,83 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
                               "rank": int(rank) if isinstance(rank, (int, float)) else 99})
 
     # Buildings: keep a building in the tile owning its centroid (no duplicates across tiles)
-    for f in ([] if coarse else raw.get("building", {}).get("features", [])):
-        p = f.get("properties", {})
-        if p.get("hide_3d"):
-            continue
-        g = _safe_shape(f["geometry"])
-        if g is None:
-            continue
-        h = float(p.get("render_height") or 0)
-        mh = float(p.get("render_min_height") or 0)
-        for poly in _polys(g):
-            c = poly.centroid
-            if not (0 <= c.x < EXTENT and 0 <= c.y < EXTENT) or poly.area < 4:
+    if coarse:
+        # Vue lointaine : on GARDE les bâtiments, on retire seulement le travail fin —
+        # validité shapely, recherche d'église, murs de moins de ~40 m² (invisibles à 3 km).
+        # Sans cette voie rapide, la réduction coûtait 3,5 s par tuile.
+        for f in raw.get("building", {}).get("features", []):
+            p = f.get("properties", {})
+            if p.get("hide_3d"):
                 continue
-            minx, miny, maxx, maxy = poly.bounds
-            church = any(
-                minx - 6 <= pt.x <= maxx + 6 and miny - 6 <= pt.y <= maxy + 6 and poly.distance(pt) <= 6
-                for pt in churches
-            )
+            geom = f["geometry"]
+            gt = geom["type"]
+            if gt == "Polygon":
+                polys = [geom["coordinates"]]
+            elif gt == "MultiPolygon":
+                polys = geom["coordinates"]
+            else:
+                continue
+            h = float(p.get("render_height") or 0)
+            mh = float(p.get("render_min_height") or 0)
             top = max(h, mh + 2.5)
-            if church and top < 14:
-                top = 14.0
-            out["buildings"].append({"h": top, "mh": mh, "rings": _rings(poly),
-                                     "church": church})
+            for ring in polys:
+                outer = ring[0] if ring else []
+                n = len(outer) - 1 if len(outer) > 1 and outer[0] == outer[-1] else len(outer)
+                if n < 3:
+                    continue
+                sx = sy = 0.0
+                minx = miny = 1e9
+                maxx = maxy = -1e9
+                area2 = 0.0
+                for i in range(n):
+                    ax, ay = outer[i][0], outer[i][1]
+                    bx, by = outer[(i + 1) % n][0], outer[(i + 1) % n][1]
+                    sx += ax
+                    sy += ay
+                    if ax < minx: minx = ax
+                    if ax > maxx: maxx = ax
+                    if ay < miny: miny = ay
+                    if ay > maxy: maxy = ay
+                    area2 += ax * by - bx * ay
+                cx, cy = sx / n, sy / n
+                if not (0 <= cx < EXTENT and 0 <= cy < EXTENT) or abs(area2) / 2 < 250:
+                    continue
+                out["buildings"].append({
+                    "h": top, "mh": mh,
+                    "rings": [_flat(outer)] + [_flat(h_) for h_ in ring[1:] if len(h_) >= 4],
+                    "church": False,
+                })
+    else:
+        for f in raw.get("building", {}).get("features", []):
+            p = f.get("properties", {})
+            if p.get("hide_3d"):
+                continue
+            g = _safe_shape(f["geometry"])
+            if g is None:
+                continue
+            h = float(p.get("render_height") or 0)
+            mh = float(p.get("render_min_height") or 0)
+            for poly in _polys(g):
+                c = poly.centroid
+                if not (0 <= c.x < EXTENT and 0 <= c.y < EXTENT) or poly.area < 4:
+                    continue
+                minx, miny, maxx, maxy = poly.bounds
+                church = any(
+                    minx - 6 <= pt.x <= maxx + 6 and miny - 6 <= pt.y <= maxy + 6 and poly.distance(pt) <= 6
+                    for pt in churches
+                )
+                top = max(h, mh + 2.5)
+                if church and top < 14:
+                    top = 14.0
+                out["buildings"].append({"h": top, "mh": mh, "rings": _rings(poly),
+                                         "church": church})
 
     # Roads, rails, paths. Tunnels are kept but flagged: their carriageway is underground,
     # so the client draws only the tunnel mouths; bridges are raised onto a deck.
     for f in raw.get("transportation", {}).get("features", []):
         p = f.get("properties", {})
         kind = ROAD_KIND.get(p.get("class", ""))
-        if not kind or (coarse and kind not in MAJOR_KINDS):
+        if not kind:
             continue
         brunnel = p.get("brunnel")
         if kind == "path" and p.get("subclass") in ("pedestrian",) and f["geometry"]["type"] in ("Polygon", "MultiPolygon"):
