@@ -133,7 +133,7 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
                            "waterways": [], "areas": [], "names": [], "pois": [], "places": []}
     if not raw:
         return out
-    box = (0, 0, EXTENT, EXTENT)
+    bounds = Polygon.from_bounds(0, 0, EXTENT, EXTENT)
 
     # POIs (needed first: churches mark their building)
     churches: list[Point] = []
@@ -245,14 +245,14 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
     for f in raw.get("transportation", {}).get("features", []):
         p = f.get("properties", {})
         kind = ROAD_KIND.get(p.get("class", ""))
-        if not kind:
+        if not kind or (coarse and kind not in {"motorway", "trunk", "primary", "secondary", "tertiary", "rail"}):
             continue
         brunnel = p.get("brunnel")
         if kind == "path" and p.get("subclass") in ("pedestrian",) and f["geometry"]["type"] in ("Polygon", "MultiPolygon"):
             g = _safe_shape(f["geometry"])
             if g is None:
                 continue
-            for poly in _polys(g.intersection(Polygon.from_bounds(*box))):
+            for poly in _polys(g.intersection(bounds)):
                 out["areas"].append({"kind": "plaza", "rings": _rings(poly)})
             continue
         if f["geometry"]["type"] not in ("LineString", "MultiLineString"):
@@ -263,7 +263,7 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
         sub = p.get("subclass") or ""
         if kind == "path" and sub in ("pedestrian", "footway", "steps"):
             kind = "pedestrian"
-        for ln in _lines(g.intersection(Polygon.from_bounds(*box))):
+        for ln in _lines(g.intersection(bounds)):
             if len(ln.coords) >= 2:
                 out["roads"].append({"kind": kind, "bridge": brunnel == "bridge",
                                      "tunnel": brunnel == "tunnel",
@@ -285,12 +285,12 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
     # Waterways (rivers, canals, streams)
     for f in raw.get("waterway", {}).get("features", []):
         p = f.get("properties", {})
-        if p.get("brunnel") == "tunnel":
+        if p.get("brunnel") == "tunnel" or (coarse and p.get("class") not in {"river", "canal"}):
             continue
         g = _safe_shape(f["geometry"])
         if g is None:
             continue
-        for ln in _lines(g.intersection(Polygon.from_bounds(*box))):
+        for ln in _lines(g.intersection(bounds)):
             if len(ln.coords) >= 2:
                 out["waterways"].append({"kind": p.get("class", "stream"), "name": p.get("name"),
                                          "pts": _flat(ln.coords)})
@@ -305,11 +305,11 @@ def reduce_tile(z: int, x: int, y: int, raw: dict | None, coarse: bool = False) 
             g = _safe_shape(f["geometry"])
             if g is None:
                 continue
-            clipped = g.intersection(Polygon.from_bounds(*box))
+            clipped = g.intersection(bounds)
             for poly in _polys(clipped):
                 if poly.area < (400 if coarse else 20):
                     continue
-                if len(poly.exterior.coords) > (120 if coarse else 400):
+                if coarse or len(poly.exterior.coords) > 400:
                     poly = poly.simplify(4.0 if coarse else 1.5)
                     if poly.is_empty or poly.geom_type != "Polygon":
                         continue

@@ -18,10 +18,11 @@ export class ApiError extends Error {
 
 type JsonBody = unknown;
 
-async function request<T>(method: string, path: string, body?: JsonBody): Promise<T> {
+async function request<T>(method: string, path: string, body?: JsonBody, signal?: AbortSignal): Promise<T> {
   // Auth rides the httpOnly session cookie automatically — never add auth headers here.
   const res = await fetch(`${BASE}${path}`, {
     method,
+    signal,
     // Aucune réponse de l'API ne doit être rejouée depuis un cache : une tuile dont le CONTENU
     // se remplit en tâche de fond (adresses, empreintes de bâtiments) garde la même apparence,
     // et le navigateur resservait une version ancienne — y compris depuis le worker, où un
@@ -43,25 +44,18 @@ async function request<T>(method: string, path: string, body?: JsonBody): Promis
 
 // The response type is yours to declare: nothing infers across the Python boundary, so a
 // TS interface here mirrors the endpoint's Pydantic model by hand — keep the two in sync.
-export const apiGet = <T>(path: string) => request<T>("GET", path);
+export const apiGet = <T>(path: string, signal?: AbortSignal) => request<T>("GET", path, undefined, signal);
 
-let tileVersionCache: string | null = null;
+let tileVersionRequest: Promise<string> | undefined;
 
-/** Version de forme des tuiles, demandée une seule fois au backend.
- *
- * Les tuiles arrivent avec un cache navigateur de 24 h : l'URL doit donc porter cette
- * version, sinon une page ouverte la veille rejoue un format périmé et le moteur échoue
- * en silence (scène vide, alerte « zone cartographique »). Une seule source de vérité :
- * le backend, qui l'annonce sur /api/. */
-export async function tileVersion(): Promise<string> {
-  if (tileVersionCache !== null) return tileVersionCache;
-  try {
-    const meta = await apiGet<{ tile_version?: number | string }>("/");
-    tileVersionCache = String(meta.tile_version ?? "0");
-  } catch {
-    tileVersionCache = "0";
-  }
-  return tileVersionCache;
+/** Partage la requête de métadonnées entre les tuiles chargées simultanément. */
+export function tileVersion(): Promise<string> {
+  return tileVersionRequest ??= apiGet<{ tile_version?: number | string }>("/", AbortSignal.timeout(5_000))
+    .then((meta) => String(meta.tile_version ?? "0"))
+    .catch(() => {
+      tileVersionRequest = undefined;
+      return "0";
+    });
 }
 export const apiPost = <T>(path: string, body?: JsonBody) => request<T>("POST", path, body ?? null);
 export const apiPut = <T>(path: string, body?: JsonBody) => request<T>("PUT", path, body ?? null);

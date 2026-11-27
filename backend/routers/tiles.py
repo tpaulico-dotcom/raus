@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 TILE_ZOOM = 14
-CACHE_VERSION = 16
+CACHE_VERSION = 17
 TILE_TTL = 30 * 24 * 3600
 TERRAIN_TTL = 30 * 24 * 3600
 TERRAIN_SIZE = 129
@@ -69,8 +69,7 @@ def _json(body: bytes) -> Response:
 
 @router.get("/tiles/{z}/{x}/{y}", response_model=TileData)
 async def get_tile(z: int, x: int, y: int, lod: str = Query("detail", pattern="^(detail|coarse)$")):
-    """`lod=coarse` : tuile allégée pour la vue lointaine (terrain, eau, grands axes, noms de
-    villes — sans bâtiments ni POI). 95 % moins de calcul et de poids, pour un survol fluide."""
+    """`lod=coarse` : grands axes, eau, silhouettes de bâtiments et noms de villes."""
     if z != TILE_ZOOM:
         raise HTTPException(status_code=400, detail=f"only zoom {TILE_ZOOM} is served")
     n = 2 ** z

@@ -12,6 +12,7 @@ const ctx = self as unknown as Worker;
 // ---------- raw data cache (survives teleports: only the build depends on the origin) ----------
 const raw = new Map<string, TileData>();
 const pending = new Map<string, Promise<TileData>>();
+const TILE_REQUEST_TIMEOUT = 15_000;
 function getTile(key: string, x: number, y: number, lod: "detail" | "coarse" = "detail"): Promise<TileData> {
   // La clé de cache porte le niveau de détail : la même tuile existe en version complète
   // (bâtiments) et en version allégée (terrain + grands axes), et les deux doivent coexister.
@@ -25,7 +26,7 @@ function getTile(key: string, x: number, y: number, lod: "detail" | "coarse" = "
   let p = pending.get(ck);
   if (!p) {
     p = tileVersion()
-      .then((v) => apiGet<TileData>(`/tiles/${TILE_Z}/${x}/${y}?v=${v}&lod=${lod}`))
+      .then((v) => apiGet<TileData>(`/tiles/${TILE_Z}/${x}/${y}?v=${v}&lod=${lod}`, AbortSignal.timeout(TILE_REQUEST_TIMEOUT)))
       .then((d) => {
       raw.set(ck, d);
       if (raw.size > 80) raw.delete(raw.keys().next().value as string);
@@ -44,7 +45,7 @@ async function getTerrain(key: string, x: number, y: number): Promise<{ h: Float
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const g = await apiGet<TerrainGrid>(`/terrain/${TILE_Z}/${x}/${y}`);
+        const g = await apiGet<TerrainGrid>(`/terrain/${TILE_Z}/${x}/${y}`, AbortSignal.timeout(TILE_REQUEST_TIMEOUT));
         h = new Float32Array(g.heights);
         break;
       } catch (err) {
